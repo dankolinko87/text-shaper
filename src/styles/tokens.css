@@ -1,0 +1,125 @@
+/*
+ * Design tokens. No component hard-codes a colour, size, or radius.
+ * A single restrained accent is reserved for active tools, selection, and
+ * primary actions, so the artwork stays the dominant element on screen.
+ */
+
+:root {
+  /* Surfaces — dark neutral, slightly warm to sit apart from the artboard. */
+  --surface-0: #0d0e11;
+  --surface-1: #131519;
+  --surface-2: #191c21;
+  --surface-3: #21252c;
+  --surface-raised: #262b33;
+
+  /* Text */
+  --text-primary: #e8eaed;
+  --text-secondary: #a2a9b4;
+  --text-tertiary: #6d757f;
+  --text-disabled: #4a515a;
+  --text-on-accent: #0b0d10;
+
+  /* Borders */
+  --border-subtle: #23272e;
+  --border-default: #2d323a;
+  --border-strong: #3a4049;
+
+  /* Accent — used sparingly */
+  --accent: #7fd1c1;
+  --accent-hover: #96dcce;
+  --accent-muted: rgba(127, 209, 193, 0.14);
+  --accent-border: rgba(127, 209, 193, 0.4);
+
+  /* Status */
+  --warning: #e0b060;
+  --warning-muted: rgba(224, 176, 96, 0.14);
+  --danger: #e07a6b;
+  --danger-muted: rgba(224, 122, 107, 0.14);
+
+  /*
+   * Selection, on the canvas and in the panels.
+   *
+   * Its own colour rather than the accent: the accent marks what you can DO,
+   * selection marks what you are working ON, and one colour for both made a
+   * selected object read like a button. Strong enough to be seen over artwork,
+   * including over the accent itself.
+   *
+   * `src/editor/colours.ts` reads this at runtime, so the canvas cannot drift
+   * away from the panels.
+   */
+  --selection: #2f80ed;
+  --selection-muted: rgba(47, 128, 237, 0.16);
+  --selection-border: rgba(47, 128, 237, 0.45);
+  /* The tint inside a selection box on the canvas — a hint, not a highlight. */
+  --selection-wash: rgba(47, 128, 237, 0.1);
+
+  /* Spacing scale */
+  --space-1: 2px;
+  --space-2: 4px;
+  --space-3: 6px;
+  --space-4: 8px;
+  --space-5: 12px;
+  --space-6: 16px;
+  --space-8: 24px;
+
+  /* Radii */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-full: 999px;
+
+  /* Typography */
+  --font-ui:
+    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+  --text-xs: 10px;
+  --text-sm: 11px;
+  --text-md: 12px;
+
+  /* Elevation — restrained */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 8px 28px rgba(0, 0, 0, 0.45);
+
+  /* Layout */
+  --panel-width: 268px;
+  --topbar-height: 44px;
+
+  /*
+   * The pills that float over the artwork — the tools, and the bar under the
+   * selected object. Black on purpose: they sit over the page, whatever colour
+   * it is, and read as controls rather than as part of it. The hairline edge is
+   * what keeps them visible on a page that is itself black.
+   */
+  --pill-bg: #000;
+  --pill-fg: #fff;
+  --pill-line: rgba(255, 255, 255, 0.3);
+  --pill-edge: rgba(255, 255, 255, 0.12);
+  --pill-height: 32px;
+  --tool-pill-height: 40px;
+
+  /*
+   * Stacking, in one place. Anything that floats reads one of these; nothing
+   * writes a number of its own. Tooltips out-rank menus so a tip on a menu
+   * button is never hidden by the menu it opens.
+   */
+  --z-canvas-bar: 3;
+  --z-toolbar: 10;
+  --z-popover: 20;
+  --z-overlay: 30;
+  --z-tooltip: 40;
+
+  /* Motion */
+  --ease: cubic-bezier(0.32, 0.72, 0, 1);
+  --duration-fast: 100ms;
+  /* A panel opening: long enough to be seen as a move, short enough to ignore. */
+  --duration-slow: 220ms;
+}
+
+/* Honour the user's motion preference throughout. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-fast: 0ms;
+    --duration-slow: 0ms;
+  }
+}

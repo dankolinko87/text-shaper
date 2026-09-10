@@ -1,0 +1,254 @@
+{
+  "spiral/ellipse/wrap/short": {
+    "ok": true,
+    "size": 81.195,
+    "lines": 1,
+    "path": "b954fecd7923e74f",
+    "band": null
+  },
+  "ring/ellipse/wrap/short": {
+    "ok": true,
+    "size": 131.97,
+    "lines": 1,
+    "path": "1ced8b258d28f6e7",
+    "band": null
+  },
+  "spiral/ellipse/wrap/long": {
+    "ok": true,
+    "size": 40.729,
+    "lines": 1,
+    "path": "38384b0f077b1e75",
+    "band": null
+  },
+  "ring/ellipse/wrap/long": {
+    "ok": true,
+    "size": 22.145,
+    "lines": 1,
+    "path": "152520baf57af44a",
+    "band": null
+  },
+  "spiral/ellipse/set/short": {
+    "ok": true,
+    "size": 81.195,
+    "lines": 1,
+    "path": "18060c442bc0b3e9",
+    "band": null
+  },
+  "ring/ellipse/set/short": {
+    "ok": true,
+    "size": 131.97,
+    "lines": 1,
+    "path": "e6c8fbf17c7a8978",
+    "band": null
+  },
+  "spiral/ellipse/set/long": {
+    "ok": true,
+    "size": 40.729,
+    "lines": 1,
+    "path": "1a933f311f013810",
+    "band": null
+  },
+  "ring/ellipse/set/long": {
+    "ok": true,
+    "size": 22.145,
+    "lines": 1,
+    "path": "78f96135258c71e6",
+    "band": null
+  },
+  "spiral/rectangle/wrap/short": {
+    "ok": true,
+    "size": 89.516,
+    "lines": 1,
+    "path": "b84ff805ba3df850",
+    "band": null
+  },
+  "ring/rectangle/wrap/short": {
+    "ok": true,
+    "size": 134.523,
+    "lines": 1,
+    "path": "a587f76a694eccae",
+    "band": null
+  },
+  "spiral/rectangle/wrap/long": {
+    "ok": true,
+    "size": 43.127,
+    "lines": 1,
+    "path": "ac5946ff5dbc21d1",
+    "band": null
+  },
+  "ring/rectangle/wrap/long": {
+    "ok": true,
+    "size": 26.536,
+    "lines": 1,
+    "path": "729fa0dd131efbde",
+    "band": null
+  },
+  "spiral/rectangle/set/short": {
+    "ok": true,
+    "size": 89.516,
+    "lines": 1,
+    "path": "7e17134cf6377abb",
+    "band": null
+  },
+  "ring/rectangle/set/short": {
+    "ok": true,
+    "size": 134.523,
+    "lines": 1,
+    "path": "aa5d0d82dcbef583",
+    "band": null
+  },
+  "spiral/rectangle/set/long": {
+    "ok": true,
+    "size": 43.127,
+    "lines": 1,
+    "path": "fbdf06606292da85",
+    "band": null
+  },
+  "ring/rectangle/set/long": {
+    "ok": true,
+    "size": 26.536,
+    "lines": 1,
+    "path": "5e2cb0ea6482ad98",
+    "band": null
+  },
+  "spiral/blob/wrap/short": {
+    "ok": true,
+    "size": 83.245,
+    "lines": 1,
+    "path": "f7ab473ac3d92f57",
+    "band": null
+  },
+  "ring/blob/wrap/short": {
+    "ok": true,
+    "size": 135.306,
+    "lines": 1,
+    "path": "15779352decf1fc7",
+    "band": null
+  },
+  "spiral/blob/wrap/long": {
+    "ok": true,
+    "size": 36.09,
+    "lines": 1,
+    "path": "4286cea84ef0d50a",
+    "band": null
+  },
+  "ring/blob/wrap/long": {
+    "ok": true,
+    "size": 22.705,
+    "lines": 1,
+    "path": "65eecba3d60f9626",
+    "band": null
+  },
+  "spiral/blob/set/short": {
+    "ok": true,
+    "size": 83.245,
+    "lines": 1,
+    "path": "3562e5ed2cea3253",
+    "band": null
+  },
+  "ring/blob/set/short": {
+    "ok": true,
+    "size": 135.306,
+    "lines": 1,
+    "path": "ffb0ab791f6aa9b0",
+    "band": null
+  },
+  "spiral/blob/set/long": {
+    "ok": true,
+    "size": 36.09,
+    "lines": 1,
+    "path": "7968fe9c1dbddd18",
+    "band": null
+  },
+  "ring/blob/set/long": {
+    "ok": true,
+    "size": 22.705,
+    "lines": 1,
+    "path": "0c3b6e98619673cc",
+    "band": null
+  },
+  "spiral/hole": {
+    "ok": true,
+    "size": 34.394,
+    "lines": 1,
+    "path": "a825d469141e2308",
+    "band": null
+  },
+  "spiral/outward": {
+    "ok": true,
+    "size": 40.681,
+    "lines": 1,
+    "path": "2784124c10333c2b",
+    "band": null
+  },
+  "spiral/upright": {
+    "ok": true,
+    "size": 81.195,
+    "lines": 1,
+    "path": "ddc64c7881dc3460",
+    "band": null
+  },
+  "spiral/banner": {
+    "ok": true,
+    "size": 30.325,
+    "lines": 1,
+    "path": "cbb54805c565a1ba",
+    "band": "8eaafd936f9ddca1"
+  },
+  "spiral/thin": {
+    "ok": true,
+    "size": 40.729,
+    "lines": 1,
+    "path": "38384b0f077b1e75",
+    "band": "ffda8d58e65c1e39"
+  },
+  "ring/outside": {
+    "ok": true,
+    "size": 206.384,
+    "lines": 1,
+    "path": "6a7df4443ebdee37",
+    "band": null
+  },
+  "ring/centred": {
+    "ok": true,
+    "size": 160.995,
+    "lines": 1,
+    "path": "b55fb0c7c57a8e07",
+    "band": null
+  },
+  "ring/split": {
+    "ok": true,
+    "size": 120.408,
+    "lines": 1,
+    "path": "8ad1e103a6deebfa",
+    "band": null
+  },
+  "ring/banner": {
+    "ok": true,
+    "size": 115.336,
+    "lines": 1,
+    "path": "244dbbb3ec44fe17",
+    "band": "e8dc2b3f4ece147f"
+  },
+  "ring/split-banner": {
+    "ok": true,
+    "size": 120.408,
+    "lines": 1,
+    "path": "8ad1e103a6deebfa",
+    "band": "42aca9a5ba9e7da0"
+  },
+  "ring/upright": {
+    "ok": true,
+    "size": 131.97,
+    "lines": 1,
+    "path": "df57b7a5e39f124c",
+    "band": null
+  },
+  "ring/shift": {
+    "ok": true,
+    "size": 150.586,
+    "lines": 1,
+    "path": "e3379364c8abb95a",
+    "band": null
+  }
+}

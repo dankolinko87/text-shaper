@@ -1,0 +1,68 @@
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.app__body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.app__stage {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--surface-0);
+}
+
+/*
+ * The states rail, on the left.
+ *
+ * Its width is the animation: zero with nothing selected that has states, the
+ * panel width when something does. The panel inside is a fixed width so the
+ * rail clips it rather than squashing it, and fades and slides on its own so
+ * the open reads as a panel arriving rather than a curtain drawing.
+ *
+ * Opening is a mount keyframe — the content mounts in the same commit the
+ * width flips, so there is no earlier state to transition from — and closing
+ * is a transition on the content that stays until the width has closed over
+ * it (see `StatesRail`). Both are zero under reduced motion.
+ */
+.app__rail {
+  display: flex;
+  width: 0;
+  flex-shrink: 0;
+  overflow: hidden;
+  transition: width var(--duration-slow) var(--ease);
+}
+.app__rail[data-open='true'] {
+  width: var(--panel-width);
+}
+.app__rail[data-open='false'] .panel--states {
+  opacity: 0;
+  translate: -12px 0;
+}
+@keyframes rail-in {
+  from {
+    opacity: 0;
+    translate: -12px 0;
+  }
+}
+
+.app__sidebar {
+  display: flex;
+  flex-direction: column;
+  width: var(--panel-width);
+  min-height: 0;
+  flex-shrink: 0;
+}
+
+.loading-overlay__detail {
+  color: var(--text-disabled);
+  font-size: var(--text-sm);
+}

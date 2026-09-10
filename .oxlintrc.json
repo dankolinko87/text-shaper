@@ -1,0 +1,171 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["react", "typescript", "oxc"],
+
+  // Revert points are frozen copies of files as they were before a change, kept
+  // because this project has no git. They are not built and not imported, and
+  // linting them reports the same warnings twice.
+  "ignorePatterns": [".revert/**", "dist/**"],
+  "rules": {
+    "react/rules-of-hooks": "error",
+    "react/only-export-components": ["warn", { "allowConstantExport": true }]
+  },
+
+  // ---------------------------------------------------------------------------
+  // Architecture boundaries.
+  //
+  // `src/geometry/` and `src/typography/` are pure TypeScript: no DOM, no React,
+  // no Fabric, no Zustand. That is what lets Vitest run them under
+  // `environment: 'node'` with no jsdom (see vite.config.ts). The rules below
+  // turn that convention into a build failure instead of a code-review habit.
+  //
+  // Each override below owns a disjoint set of files — `excludeFiles` carves out
+  // the narrower groups — because oxlint gives a file the config from the LAST
+  // matching override rather than merging them. Keeping the groups disjoint
+  // means the order of this array does not matter. If you add an override that
+  // sets `no-restricted-imports`, exclude its files from the others too.
+  //
+  // Known gap: `no-restricted-imports` sees `import`, `import type`,
+  // `export ... from`, and dynamic `import()`, but not `require()`. This package
+  // is ESM-only ("type": "module", verbatimModuleSyntax), so `require` would not
+  // survive Vite or Vitest anyway.
+  // ---------------------------------------------------------------------------
+  "overrides": [
+    {
+      // Everything that is not an engine module and not the Fabric renderer.
+      // Fabric is the editor's business; paper.js belongs to paperContext.
+      //
+      // `tests/editor/` is excluded for the same reason `src/editor/` is: the
+      // canvas reconciler's bugs are about what Fabric does to an object when it
+      // is selected, so testing it means driving the real Fabric object graph.
+      // It ships a Node build for exactly this.
+      "files": ["src/**", "tests/**"],
+      "excludeFiles": [
+        "src/geometry/**",
+        "src/typography/**",
+        "src/editor/**",
+        "tests/editor/**"
+      ],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": ["fabric", "fabric/**"],
+                "message": "Fabric is confined to src/editor/. Other modules work with plain geometry data and let the editor render it."
+              },
+              {
+                "group": ["paper", "paper/**"],
+                "message": "paper.js is confined to src/geometry/paperContext.ts. Go through withPaper() so every path operation runs inside the one headless scope."
+              }
+            ]
+          }
+        ]
+      }
+    },
+
+    {
+      // The Fabric renderer: Fabric is allowed here and nowhere else.
+      "files": ["src/editor/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": ["paper", "paper/**"],
+                "message": "paper.js is confined to src/geometry/paperContext.ts. Go through withPaper() so every path operation runs inside the one headless scope."
+              }
+            ]
+          }
+        ]
+      }
+    },
+
+    {
+      // The pure engines. Keep these importable from plain Node.
+      "files": ["src/geometry/**", "src/typography/**"],
+      "excludeFiles": ["src/geometry/paperContext.ts"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "react",
+                  "react/**",
+                  "react-dom",
+                  "react-dom/**",
+                  "zustand",
+                  "zustand/**",
+                  "fabric",
+                  "fabric/**"
+                ],
+                "message": "src/geometry and src/typography are pure TypeScript — no React, Fabric or Zustand. They are unit-tested under Vitest's 'node' environment with no jsdom, and a UI import breaks that."
+              },
+              {
+                "group": [
+                  "**/state",
+                  "**/state/**",
+                  "**/editor",
+                  "**/editor/**",
+                  "**/components",
+                  "**/components/**",
+                  "**/app",
+                  "**/app/**"
+                ],
+                "message": "The engines must not depend on the app layers (state/, editor/, components/, app/). Dependencies point inward: the app imports the engines, never the reverse."
+              },
+              {
+                "group": ["paper", "paper/**"],
+                "message": "paper.js is confined to src/geometry/paperContext.ts. Go through withPaper() so every path operation runs inside the one headless scope."
+              }
+            ]
+          }
+        ]
+      }
+    },
+
+    {
+      // The single paper.js entry point: same engine rules, minus the paper ban.
+      "files": ["src/geometry/paperContext.ts"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "react",
+                  "react/**",
+                  "react-dom",
+                  "react-dom/**",
+                  "zustand",
+                  "zustand/**",
+                  "fabric",
+                  "fabric/**"
+                ],
+                "message": "src/geometry and src/typography are pure TypeScript — no React, Fabric or Zustand. They are unit-tested under Vitest's 'node' environment with no jsdom, and a UI import breaks that."
+              },
+              {
+                "group": [
+                  "**/state",
+                  "**/state/**",
+                  "**/editor",
+                  "**/editor/**",
+                  "**/components",
+                  "**/components/**",
+                  "**/app",
+                  "**/app/**"
+                ],
+                "message": "The engines must not depend on the app layers (state/, editor/, components/, app/). Dependencies point inward: the app imports the engines, never the reverse."
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}
