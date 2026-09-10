@@ -41,5 +41,11 @@ export default defineConfig({
     // engines are testable without jsdom.
     environment: 'node',
     include: ['tests/**/*.test.ts'],
+    /*
+     * The parity and banner tests draw thirty runs of Bézier type through
+     * paper.js each, which is a few seconds here and twenty on a shared CI
+     * runner. The default five seconds measured the machine, not the code.
+     */
+    testTimeout: 60_000,
   },
 })
