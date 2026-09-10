@@ -1,5 +1,7 @@
 # Text Shaper
 
+Live: https://dankolinko87.github.io/text-shaper/ — built and published from `main` by `.github/workflows/deploy.yml`.
+
 An experimental typography tool. Draw a closed shape with a brush, type text into it, and the text
 wraps, scales, and stretches to fill the shape's usable area.
 
