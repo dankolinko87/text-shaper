@@ -246,6 +246,221 @@
   cursor: default;
 }
 
+/* Colour picker ------------------------------------------------------- */
+
+/*
+ * Fixed and floating: it is rendered through a portal and placed from its
+ * swatch by `ColorPicker`. Above the panel it opened from, below tooltips.
+ */
+.color-picker {
+  --popover-from: calc(var(--space-2) * -1);
+  position: fixed;
+  z-index: var(--z-float);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  width: 272px;
+  padding: var(--space-4);
+}
+/*
+ * Saturation left to right, brightness bottom to top, under the chosen hue:
+ * white fading into the hue, with black rising from the floor.
+ */
+.color-picker__field {
+  position: relative;
+  height: 196px;
+  border-radius: var(--radius-sm);
+  background:
+    linear-gradient(to top, #000, transparent),
+    linear-gradient(to right, #fff, var(--picker-hue));
+  cursor: crosshair;
+  touch-action: none;
+  outline-offset: 2px;
+}
+.color-picker__ring {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border: 3px solid #fff;
+  border-radius: var(--radius-full);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.35),
+    inset 0 0 0 1px rgba(0, 0, 0, 0.15);
+  translate: -50% -50%;
+  pointer-events: none;
+}
+/*
+ * The two sliders: a thick round track that shows what it sets, and a white
+ * ring for a thumb with the colour it stands on inside.
+ *
+ * Two things about how these are written. The selectors carry the element and
+ * attribute so they outrank the app's slider rule, which is `input[type=
+ * 'range']` and would otherwise win. And every `-webkit-` and `-moz-` pseudo
+ * stands in a rule of its own: a browser drops a whole rule when any selector
+ * in its list names a pseudo-element it does not know, so a list that mixes
+ * the two vendors styles nothing anywhere.
+ */
+input[type='range'].color-picker__hue,
+input[type='range'].color-picker__alpha {
+  /* Not a flex item that may shrink: the app's slider rule says `flex: 1`. */
+  flex: none;
+  height: 20px;
+}
+input[type='range'].color-picker__hue::-webkit-slider-runnable-track {
+  height: 14px;
+  border-radius: var(--radius-full);
+  background: linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00);
+}
+input[type='range'].color-picker__hue::-moz-range-track {
+  height: 14px;
+  border-radius: var(--radius-full);
+  background: linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00);
+}
+input[type='range'].color-picker__alpha::-webkit-slider-runnable-track {
+  height: 14px;
+  border-radius: var(--radius-full);
+  background-color: #fff;
+  background-image:
+    linear-gradient(to right, transparent, var(--picker-colour)),
+    linear-gradient(45deg, #c8c8c8 25%, transparent 25%),
+    linear-gradient(-45deg, #c8c8c8 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #c8c8c8 75%),
+    linear-gradient(-45deg, transparent 75%, #c8c8c8 75%);
+  background-size:
+    auto,
+    8px 8px,
+    8px 8px,
+    8px 8px,
+    8px 8px;
+  background-position:
+    0 0,
+    0 0,
+    0 4px,
+    4px -4px,
+    -4px 0;
+}
+input[type='range'].color-picker__alpha::-moz-range-track {
+  height: 14px;
+  border-radius: var(--radius-full);
+  background-color: #fff;
+  background-image:
+    linear-gradient(to right, transparent, var(--picker-colour)),
+    linear-gradient(45deg, #c8c8c8 25%, transparent 25%),
+    linear-gradient(-45deg, #c8c8c8 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #c8c8c8 75%),
+    linear-gradient(-45deg, transparent 75%, #c8c8c8 75%);
+  background-size:
+    auto,
+    8px 8px,
+    8px 8px,
+    8px 8px,
+    8px 8px;
+  background-position:
+    0 0,
+    0 0,
+    0 4px,
+    4px -4px,
+    -4px 0;
+}
+input[type='range'].color-picker__hue::-webkit-slider-thumb {
+  width: 18px;
+  height: 18px;
+  margin-top: -2px;
+  border: 3px solid #fff;
+  background: var(--picker-hue);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.3);
+}
+input[type='range'].color-picker__hue:hover::-webkit-slider-thumb {
+  background: var(--picker-hue);
+}
+input[type='range'].color-picker__alpha::-webkit-slider-thumb {
+  width: 18px;
+  height: 18px;
+  margin-top: -2px;
+  border: 3px solid #fff;
+  background: var(--picker-colour);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.3);
+}
+input[type='range'].color-picker__alpha:hover::-webkit-slider-thumb {
+  background: var(--picker-colour);
+}
+input[type='range'].color-picker__hue::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border: 3px solid #fff;
+  background: var(--picker-hue);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.3);
+}
+input[type='range'].color-picker__alpha::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border: 3px solid #fff;
+  background: var(--picker-colour);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.3);
+}
+.color-picker__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+/* Hex, RGB or HSL: the same control the font uses, made narrow. Written
+   under the row so it outranks the input's own `width: 100%`. */
+.color-picker__row .color-picker__format {
+  flex: none;
+  width: 60px;
+  height: 28px;
+  padding: 0 22px 0 var(--space-2);
+  background-color: var(--well);
+  background-position: right var(--space-2) center;
+}
+/* The hex, in a well like the colour row's — without the swatch, which is the whole field above. */
+.color-picker__hex {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--well);
+  transition: border-color var(--duration-fast) var(--ease);
+}
+.color-picker__hex:hover,
+.color-picker__hex:focus-within {
+  border-color: var(--border-strong);
+}
+/* One channel of RGB or HSL: a narrow well with nothing but the number. */
+.color-picker__value {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 var(--space-1);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--well);
+  transition: border-color var(--duration-fast) var(--ease);
+}
+.color-picker__value:hover,
+.color-picker__value:focus-within {
+  border-color: var(--border-strong);
+}
+.color-picker__value .slider__input {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: center;
+}
+/* Under the row so it outranks the colour row's own width for this well. */
+.color-picker__row .color-picker__opacity {
+  width: 50px;
+}
+
 /* Tooltip ------------------------------------------------------------- */
 
 .tooltip-wrap {
@@ -332,6 +547,24 @@
 .input:hover,
 .textarea:hover {
   border-color: var(--border-strong);
+}
+/*
+ * A dropdown draws its own chevron: the browser's sits flush against the
+ * edge and cannot be moved. Lucide's chevron, inset like every other glyph
+ * in the app, with the text kept clear of it. Two colours, one per palette,
+ * because an image cannot read a token.
+ */
+select.input {
+  appearance: none;
+  padding-right: calc(var(--space-3) * 2 + 14px);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a2a9b4' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right var(--space-3) center;
+  background-size: 14px;
+  cursor: pointer;
+}
+:root[data-theme='light'] select.input {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%234e545c' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
 }
 .input:disabled,
 .textarea:disabled {
@@ -449,7 +682,7 @@ input[type='range']::-moz-range-thumb {
   padding: 2px;
   border: 1px solid var(--border-default);
   border-radius: var(--radius-md);
-  background: var(--surface-0);
+  background: var(--well);
 }
 .segmented button {
   flex: 1;
@@ -467,11 +700,13 @@ input[type='range']::-moz-range-thumb {
 .segmented button:hover {
   color: var(--text-primary);
 }
-.segmented button:active {
-  background: var(--surface-2);
+/* Pressing is halfway to chosen — never lighter than the chosen segment. */
+.segmented button:active:not([aria-pressed='true']) {
+  background: color-mix(in srgb, var(--well-raised) 50%, var(--well));
 }
 .segmented button[aria-pressed='true'] {
-  background: var(--surface-3);
+  background: var(--well-raised);
+  box-shadow: var(--well-raised-shadow);
   color: var(--text-primary);
 }
 
@@ -489,7 +724,8 @@ input[type='range']::-moz-range-thumb {
   gap: var(--space-2);
 }
 .color-field__well,
-.color-field__alpha {
+.color-field__alpha,
+.gradient-field__at {
   display: flex;
   align-items: center;
   height: 28px;
@@ -500,8 +736,10 @@ input[type='range']::-moz-range-thumb {
 }
 .color-field__well:hover,
 .color-field__alpha:hover,
+.gradient-field__at:hover,
 .color-field__well:focus-within,
-.color-field__alpha:focus-within {
+.color-field__alpha:focus-within,
+.gradient-field__at:focus-within {
   border-color: var(--border-strong);
 }
 .color-field__well {
@@ -510,14 +748,22 @@ input[type='range']::-moz-range-thumb {
   gap: var(--space-3);
   padding: 0 var(--space-3);
 }
-.color-field__alpha {
+.color-field__alpha,
+.gradient-field__at {
   flex: none;
-  width: 56px;
+  width: 60px;
   gap: 2px;
   padding: 0 var(--space-3);
 }
-.color-field__alpha .slider__input {
-  width: 100%;
+/* Three digits and a sign; the row's hex needs the width more than this does. */
+.gradient-field__at {
+  width: 50px;
+}
+/* In a well the number flexes and the unit does not. */
+.color-field__alpha .slider__input,
+.gradient-field__at .slider__input {
+  flex: 1 1 0;
+  width: auto;
   min-width: 0;
   padding: 0;
   border: 0;
@@ -525,6 +771,7 @@ input[type='range']::-moz-range-thumb {
   text-align: left;
 }
 .color-field__unit {
+  flex: none;
   color: var(--text-tertiary);
   font-family: var(--font-mono);
   font-size: var(--text-sm);
@@ -551,15 +798,16 @@ input[type='range']::-moz-range-thumb {
   position: absolute;
   inset: 0;
 }
-.color-field__swatch input {
-  position: absolute;
-  inset: -4px;
-  width: calc(100% + 8px);
-  height: calc(100% + 8px);
+/* The swatch is the button that opens the picker. */
+.color-field__swatch {
   padding: 0;
-  border: none;
-  background: none;
   cursor: pointer;
+}
+.color-field__swatch:disabled {
+  cursor: default;
+}
+.color-field__swatch[aria-expanded='true'] {
+  border-color: var(--accent);
 }
 .color-field__hex {
   flex: 1;

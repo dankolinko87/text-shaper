@@ -93,7 +93,7 @@ const render = (spread: boolean, shown = 0): Map<string, RenderedObject> => {
     bandPaths: fitted?.ok && fitted.band ? { [member.object.id]: fitted.band } : {},
     ribbons: {},
     rendered,
-    spreadFrame: spread ? frame : null,
+    spread: spread ? frame : null,
     insideFrame: frame,
     mosaicStates: { [frame]: shown },
   } as never)
@@ -105,7 +105,7 @@ const render = (spread: boolean, shown = 0): Map<string, RenderedObject> => {
 
 /** Every group on the canvas that belongs to the frame, windows included. */
 const groups = () =>
-  canvas.getObjects().filter((o) => (o as { get: (k: string) => unknown }).get('frameId') === frame)
+  canvas.getObjects().filter((o) => (o as { get: (k: string) => unknown }).get('statedId') === frame)
 
 const childOf = (window: RenderedObject['group']): Group => {
   const member = frameIn().members[0]!
@@ -121,7 +121,7 @@ beforeEach(() => {
     future: [],
     selection: [],
   })
-  useUiStore.setState({ insideFrame: null, spreadFrame: null, frameSelection: [], mosaicStates: {} })
+  useUiStore.setState({ insideFrame: null, spread: null, frameSelection: [], mosaicStates: {} })
   canvas = new Canvas(undefined as never, { width: 2400, height: 900 })
   rendered = new Map()
 
@@ -192,7 +192,7 @@ describe('spreading a frame', () => {
     expect(first!.get('shapeId'), 'the first one IS the frame').toBe(frame)
     for (const window of rest) {
       expect(window.get('shapeId')).toBeUndefined()
-      expect(window.get('frameId'), 'but it knows whose it is').toBe(frame)
+      expect(window.get('statedId'), 'but it knows whose it is').toBe(frame)
       expect(window.selectable).toBe(false)
     }
   })
@@ -333,9 +333,9 @@ describe('what a spread frame will not do', () => {
 
   it('never touches the document, so there is nothing to undo', () => {
     const past = store().past.length
-    useUiStore.getState().setSpreadFrame(frame)
+    useUiStore.getState().setSpread(frame)
     render(true)
-    useUiStore.getState().setSpreadFrame(null)
+    useUiStore.getState().setSpread(null)
     render(false)
     expect(store().past.length).toBe(past)
   })
@@ -349,5 +349,26 @@ describe('fitting the view', () => {
     const row = contentBounds(rendered)!
     expect(row.width, 'wide enough for three').toBeGreaterThan(alone.width * 2.5)
     expect(row.x, 'and still starts where the frame does').toBeCloseTo(alone.x, 0)
+  })
+})
+
+describe('deleting a spread frame', () => {
+  it('takes every window off the canvas, not only the first', () => {
+    render(true)
+    expect(groups()).toHaveLength(3)
+    store().deleteObjects([frame])
+    rendered = syncCanvas({
+      canvas,
+      doc: store().doc,
+      textPaths: {},
+      bandPaths: {},
+      ribbons: {},
+      rendered,
+      spread: frame,
+      insideFrame: frame,
+      mosaicStates: {},
+    } as never)
+    expect(groups(), 'nothing left behind').toHaveLength(0)
+    expect(rendered.has(frame)).toBe(false)
   })
 })

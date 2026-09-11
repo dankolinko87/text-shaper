@@ -469,7 +469,7 @@ describe('the frame while you are inside it', () => {
     store().duplicateFrameState(frame, 1)
     inside(frame, 2)
     const group = rendered.get(frame)!.group
-    expect(group.get('frameId')).toBe(frame)
+    expect(group.get('statedId')).toBe(frame)
     expect(group.get('stateIndex')).toBe(2)
   })
 

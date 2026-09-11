@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { deleteStateAt, duplicateStateAt } from '../../src/editor/mosaicStates'
+import { deleteStateAt, duplicateStateAt } from '../../src/editor/stated'
 import { useDocumentStore } from '../../src/state/documentStore'
 import { useUiStore } from '../../src/state/uiStore'
 import type { LetterMosaicObject } from '../../src/types/document'

@@ -3,20 +3,21 @@ import { useEffect } from 'react'
 
 import { pointObjectToArtboard } from '../geometry/objectSpace'
 import { useUiStore } from '../state/uiStore'
-import type { FrameObject } from '../types/document'
+import type { FrameObject, LetterMosaicObject } from '../types/document'
 import { token } from './colours'
-import { plateBounds } from './objectBarActions'
+import { plateBounds } from './stated'
 import { liveTransform } from './renderer'
 
 /**
- * The plate behind a frame you have hold of.
+ * The plate behind a thing with states that you have hold of: a frame, or a
+ * mosaic.
  *
- * A rounded grey strip with a little padding, under the selected frame or the
- * one being worked inside — so the frame reads as a place laid out on the
- * page rather than a box drawn on it, the way a Figma frame's name and edge
- * set it apart from what is merely near it. Spread, the plate takes the whole
- * row in, and its top edge makes screen-sized room for the number chips;
- * collapsed there are no chips, so there is no extra room.
+ * A rounded grey strip with a little padding, under the selected object or the
+ * frame being worked inside — so it reads as a place laid out on the page
+ * rather than a box drawn on it, the way a Figma frame's name and edge set it
+ * apart from what is merely near it. Spread, the plate takes the whole row in,
+ * and its top edge makes screen-sized room for the number chips; collapsed
+ * there are no chips, so there is no extra room.
  *
  * Drawn once per frame and RE-PLACED before every render from the live
  * transform, so it follows a drag, a turn or a resize as it happens rather
@@ -30,9 +31,9 @@ export function FramePlate({
   object,
 }: {
   canvas: FabricCanvas | null
-  object: FrameObject | undefined
+  object: FrameObject | LetterMosaicObject | undefined
 }) {
-  const spread = useUiStore((s) => Boolean(object) && s.spreadFrame === object?.id)
+  const spread = useUiStore((s) => Boolean(object) && s.spread === object?.id)
 
   useEffect(() => {
     if (!canvas || !object) return

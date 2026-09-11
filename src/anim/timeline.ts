@@ -185,3 +185,30 @@ export function formatDuration(ms: number): string {
   const shown = seconds < 10 ? seconds.toFixed(1) : seconds.toFixed(0)
   return `${shown.replace(/\.0$/, '')} s`
 }
+
+/** Where a running film is: the state playing now, and how far through it, 0 to 1. */
+export interface FilmPosition {
+  index: number
+  within: number
+}
+
+/**
+ * The state on screen at a moment, and how much of its turn — its hold and
+ * the transition out of it, as one stretch — has gone by. What a strip of
+ * state cards needs to run like film: one card lit, its bar filling, then the
+ * next. Built on `momentAt`, so it cannot disagree with the evaluators about
+ * where the clock is.
+ */
+export function filmPosition(
+  states: readonly Timed[],
+  timeMs: number,
+  minTransitionMs: number = MIN_TRANSITION_MS,
+): FilmPosition | null {
+  const moment = momentAt(states, timeMs, minTransitionMs)
+  const state = moment ? states[moment.from] : undefined
+  if (!moment || !state) return null
+  const hold = holdOf(state)
+  const turn = hold + transitionOf(state, minTransitionMs)
+  const elapsed = moment.kind === 'hold' ? moment.localTime : hold + moment.localTime
+  return { index: moment.from, within: turn > 0 ? Math.min(1, Math.max(0, elapsed / turn)) : 0 }
+}

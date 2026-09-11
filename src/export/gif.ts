@@ -194,8 +194,7 @@ function paintStyle(
       box.y + ends.y2 * box.height,
     )
   }
-  gradient.addColorStop(0, paint.from)
-  gradient.addColorStop(1, paint.to)
+  for (const stop of paint.stops) gradient.addColorStop(stop.at, stop.colour)
   return gradient
 }
 

@@ -16,6 +16,7 @@ import { isTypedCharacter } from '../mosaic/graphemes'
 import { readingOrder, stepThrough, tileInDirection } from '../mosaic/order'
 import { mosaicMoves } from './animationPlayback'
 import { liveTransform } from './renderer'
+import { shownWindow, windowTransform } from './stated'
 import {
   backspaceCharacter,
   deleteCharacter,
@@ -108,6 +109,23 @@ function selectionSpans(
 /** A point on an edge's line, at `along` on the axis it runs down. */
 const pointOnEdge = (edge: MosaicEdge, along: number): Vec2 =>
   edge.axis === 'x' ? { x: edge.position, y: along } : { x: along, y: edge.position }
+
+/**
+ * Where the shown state is DRAWN, in both directions.
+ *
+ * The LIVE transform, not the stored one: Fabric moves the group as the
+ * pointer moves and only writes the result back when the gesture ends, so
+ * anything drawn from the document sat where the mosaic had been and caught up
+ * on release. Stood along the row to the shown state's window while the mosaic
+ * is spread, because a spread draws the same mosaic once per state and only
+ * the first is at its own position. Everything below maps through this — the
+ * outlines and the caret one way, the pointer the other — so they cannot
+ * disagree about which window the furniture is in.
+ */
+function where(canvas: FabricCanvas, object: LetterMosaicObject) {
+  const live = { ...object, transform: liveTransform(canvas, object.id, object.transform) }
+  return windowTransform(live, shownWindow(object, useUiStore.getState()))
+}
 
 /**
  * The cursor for an edge, measured on SCREEN rather than in the model.
@@ -208,6 +226,8 @@ interface Pending {
   // Memoised because the draw effect depends on it: rebuilt every render, the
   // whole overlay would be torn down and re-added on renders that changed nothing.
   const shown = useUiStore((s) => (object ? (s.mosaicStates[object.id] ?? 0) : 0))
+  /** Laid out as a row: the furniture rides the shown state's window. */
+  const spread = useUiStore((s) => Boolean(object) && s.spread === object?.id)
   /*
    * Playback owns the canvas while it runs.
    *
@@ -314,8 +334,7 @@ interface Pending {
      * outlines drawn from the document sat where the mosaic had been and caught
      * up only on release — the mosaic appeared to leave its own grid behind.
      */
-    const toArtboard = (p: Vec2): Vec2 =>
-      pointObjectToArtboard(liveTransform(canvas, object.id, object.transform), p)
+    const toArtboard = (p: Vec2): Vec2 => pointObjectToArtboard(where(canvas, object), p)
 
     const shared = {
       selectable: false,
@@ -552,7 +571,21 @@ interface Pending {
 
     canvas.requestRenderAll()
     return clear
-  }, [canvas, object, focus, tiles, selection, handles, hovered, active, limited, previewing, dragging])
+  }, [
+    canvas,
+    object,
+    focus,
+    tiles,
+    selection,
+    handles,
+    hovered,
+    active,
+    limited,
+    previewing,
+    dragging,
+    spread,
+    shown,
+  ])
 
   /*
    * Clicking a tile, and dragging its edges.
@@ -590,12 +623,13 @@ interface Pending {
        * unevenly, and measuring in local space is what keeps a drag correct
        * after the object has been moved, turned or stretched.
        */
-      const ex = vectorObjectToArtboard(target.transform, { x: 1, y: 0 })
-      const ey = vectorObjectToArtboard(target.transform, { x: 0, y: 1 })
+      const host = where(canvas, target)
+      const ex = vectorObjectToArtboard(host, { x: 1, y: 0 })
+      const ey = vectorObjectToArtboard(host, { x: 0, y: 1 })
       const perX = Math.hypot(ex.x, ex.y) * zoom
       const perY = Math.hypot(ey.x, ey.y) * zoom
       return {
-        point: pointArtboardToObject(target.transform, scene),
+        point: pointArtboardToObject(host, scene),
         tolerance: {
           x: perX > 0 ? HOVER_PIXELS / perX : HOVER_PIXELS,
           y: perY > 0 ? HOVER_PIXELS / perY : HOVER_PIXELS,
@@ -843,14 +877,8 @@ interface Pending {
           return
         }
 
-        const a = pointObjectToArtboard(
-          liveTransform(canvas, target2.id, target2.transform),
-          marquee.from,
-        )
-        const b = pointObjectToArtboard(
-          liveTransform(canvas, target2.id, target2.transform),
-          point,
-        )
+        const a = pointObjectToArtboard(where(canvas, target2), marquee.from)
+        const b = pointObjectToArtboard(where(canvas, target2), point)
         if (!marquee.band) {
           const band = new Rect({
             selectable: false,
@@ -1204,6 +1232,14 @@ interface Pending {
       switch (e.key) {
         case 'Escape': {
           e.preventDefault()
+          /*
+           * The caret's Escape is the caret's alone. The editor's own ladder
+           * listens on the same window and runs after this — and having read
+           * the store after the caret was put down, it took the next rung out
+           * too: one Escape left the mosaic AND folded its row or dropped the
+           * selection. Stopped here, so a keypress moves out one layer.
+           */
+          e.stopImmediatePropagation()
           /*
            * Escape during a drag cancels the DRAG, not the mode. Leaving text
            * entry as well would undo two things for one keypress, and the drag is

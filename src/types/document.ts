@@ -26,7 +26,7 @@ export const MIN_FONT_SIZE = 4
 import type { FrameMember, FrameState } from './frame'
 import type { MosaicState, MosaicTile } from './mosaic'
 
-export const DOCUMENT_SCHEMA_VERSION = 29
+export const DOCUMENT_SCHEMA_VERSION = 30
 
 /**
  * SVG path `d` string, in absolute commands.
@@ -38,6 +38,15 @@ export type PathData = string
 
 /** `#rrggbb` or `#rrggbbaa`. */
 export type ColorValue = string
+
+/** One colour along a gradient: `at` is 0..1 along the blend; the colour may carry opacity. */
+export interface GradientStop {
+  at: number
+  colour: ColorValue
+}
+
+/** What a colour effect's config may hold: a number, a hex colour, or a gradient's stops. */
+export type ColourConfigValue = number | string | GradientStop[]
 
 export interface Vec2 {
   x: number
@@ -288,8 +297,8 @@ export type ColourEffect = 'none' | 'cycle' | 'flicker' | 'gradient'
  */
 export interface ColourSettings {
   effect: ColourEffect
-  /** Effect-specific values, keyed by control id. Numbers or hex colours. */
-  config: Record<string, number | string>
+  /** Effect-specific values, keyed by control id: numbers, hex colours, or a gradient's stop list. */
+  config: Record<string, ColourConfigValue>
 }
 
 /**
@@ -638,6 +647,17 @@ export const isMosaic = (object: DocumentObject): object is LetterMosaicObject =
 
 export const isFrame = (object: DocumentObject): object is FrameObject =>
   object.kind === 'frame'
+
+/**
+ * An object with STATES: a sequence of authored arrangements it plays
+ * through, shows one of, and can lay out side by side. A mosaic and a frame
+ * today; anything that joins them gets the same list, bar, chips, spread and
+ * rules, because those are written once against this type.
+ */
+export type Stated = LetterMosaicObject | FrameObject
+
+export const isStated = (object: DocumentObject): object is Stated =>
+  object.kind === 'mosaic' || object.kind === 'frame'
 
 /**
  * How see-through an object is, whichever kind it is.

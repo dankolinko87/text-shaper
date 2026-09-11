@@ -47,21 +47,23 @@
   --danger-muted: rgba(224, 122, 107, 0.14);
 
   /*
-   * Selection, on the canvas and in the panels.
+   * Selection, on the canvas and in the panels: a dark green.
    *
-   * Its own colour rather than the accent: the accent marks what you can DO,
-   * selection marks what you are working ON, and one colour for both made a
-   * selected object read like a button. Strong enough to be seen over artwork,
-   * including over the accent itself.
+   * The same family as the accent, by choice — one green means "yours" here,
+   * whether it is the tool in your hand or the thing you have hold of — and
+   * dark enough to be seen over artwork on a light page in either palette.
+   * The name that floats over a selected object wears it too.
    *
    * `src/editor/colours.ts` reads this at runtime, so the canvas cannot drift
    * away from the panels.
    */
-  --selection: #2f80ed;
-  --selection-muted: rgba(47, 128, 237, 0.16);
-  --selection-border: rgba(47, 128, 237, 0.45);
+  --selection: #178a6f;
+  --selection-muted: rgba(23, 138, 111, 0.16);
+  --selection-border: rgba(23, 138, 111, 0.45);
   /* The tint inside a selection box on the canvas — a hint, not a highlight. */
-  --selection-wash: rgba(47, 128, 237, 0.1);
+  --selection-wash: rgba(23, 138, 111, 0.1);
+  /* The same green, deep enough to carry white: the bar under a selected object. */
+  --selection-deep: #14614f;
 
   /* Spacing scale */
   --space-1: 2px;
@@ -117,7 +119,19 @@
   --tool-pill-line: var(--pill-line);
 
   /* Behind a spread frame's row of states: a mid grey that reads on any page colour. */
-  --spread-plate: rgba(127, 127, 127, 0.18);
+  /* The plate behind a held object with states: the selection colour, washed. */
+  --spread-plate: rgba(23, 138, 111, 0.12);
+
+  /*
+   * Controls that hold a chosen state: the track a segment sits in, the
+   * segment that is chosen, the tab you are on. Named for the job rather than
+   * the shade, because in the light palette the shades that do these jobs are
+   * not the surfaces that do them in the dark.
+   */
+  --well: var(--surface-0);
+  --well-raised: var(--surface-3);
+  --well-raised-shadow: none;
+  --chip-active: var(--surface-3);
 
   /*
    * Stacking, in one place. Anything that floats reads one of these; nothing
@@ -129,6 +143,9 @@
   --z-popover: 20;
   --z-panel: 25;
   --z-overlay: 30;
+  /* A popover rendered through a portal to the body: above the panel it opened
+     from (which a popover inside that panel can never be), below tooltips. */
+  --z-float: 35;
   --z-tooltip: 40;
 
   /* Motion */
@@ -176,6 +193,11 @@
   --shadow-sm: 0 1px 2px rgba(20, 22, 26, 0.08);
   --shadow-md: 0 4px 12px rgba(20, 22, 26, 0.12);
   --shadow-lg: 0 8px 28px rgba(20, 22, 26, 0.16);
+
+  --well: #ebebe8;
+  --well-raised: #ffffff;
+  --well-raised-shadow: 0 1px 2px rgba(20, 22, 26, 0.14);
+  --chip-active: #e3e3e0;
 
   /* The tool pill in white, as Figma's is: ink glyphs, a hairline, its shadow doing the lifting. */
   --tool-pill-bg: #ffffff;

@@ -16,6 +16,7 @@ import { glyphReferenceRects, paintMosaicFrame } from './mosaicPlayback'
 import { strokeToLinePath, strokeToShapePath } from '../geometry/strokeToPath'
 import { MAX_ZOOM, MIN_ZOOM, fitToRect } from '../geometry/viewportMath'
 import { useDocumentStore } from '../state/documentStore'
+import { clearPlayhead, setPlayhead } from '../state/playhead'
 import { useUiStore, type ToolId } from '../state/uiStore'
 import type {
   FrameObject,
@@ -26,7 +27,7 @@ import type {
   TypographyObject,
   Vec2,
 } from '../types/document'
-import { isTypography } from '../types/document'
+import { isStated, isTypography } from '../types/document'
 import type { FitOutcome } from '../typography/fit'
 import { clamp } from '../utils/math'
 import {
@@ -38,8 +39,8 @@ import {
   paintFrame,
   paintFrameBackground,
   settleFrame,
+  settleWindows,
   syncCanvas,
-  windowOffset,
   windowsOf,
   type RenderedObject,
 } from './renderer'
@@ -55,10 +56,12 @@ import { FrameLayer } from './FrameLayer'
 import { FramePlate } from './FramePlate'
 import { memberBoxes } from './frameBoxes'
 import { MosaicLayer } from './MosaicLayer'
-import { spreadHoldsGround } from './frameStates'
+import { showState, shownWindow, spreadHoldsGround, windowTransform } from './stated'
 import { ObjectBar } from './ObjectBar'
+import { ObjectLabel } from './ObjectLabel'
 import { useSelectedObject } from './selection'
 import { SpreadChips } from './SpreadChips'
+import { SpreadLayer } from './SpreadLayer'
 import { PathLayer } from './PathLayer'
 import { PenLayer } from './PenLayer'
 import {
@@ -151,7 +154,7 @@ export function EditorCanvas() {
   /** The frame being worked inside — the canvas is built differently for it. */
   const insideFrame = useUiStore((s) => s.insideFrame)
   /** The frame drawn as a row of windows, one per state. */
-  const spreadFrame = useUiStore((s) => s.spreadFrame)
+  const spread = useUiStore((s) => s.spread)
   const frameSelection = useUiStore((s) => s.frameSelection)
 
   /* --------------------------------------------------------- setup */
@@ -257,7 +260,7 @@ export function EditorCanvas() {
       renderedRef.current = syncCanvas({
         mosaicStates,
         insideFrame,
-        spreadFrame,
+        spread,
         canvas,
         doc,
         textPaths,
@@ -265,19 +268,12 @@ export function EditorCanvas() {
         ribbons,
         rendered: renderedRef.current,
       })
-      /*
-       * Every window of a spread frame settled to ITS state — the one settle
-       * the stop button uses, so a window is the frame at that state and
-       * nothing else. The builder only has the shown state's text paths; the
-       * settle has every state's fit, and pours each window's type through
-       * its own outline.
-       */
-      if (spreadFrame) {
-        const entry = renderedRef.current.get(spreadFrame)
-        const object = doc.objects[spreadFrame]
-        if (entry?.windows && object?.kind === 'frame') {
-          entry.windows.forEach((window, i) => settleFrame(window, object, i, fits))
-        }
+      // Every window of a spread object settled to ITS state, where the kind
+      // needs a settle at all.
+      if (spread) {
+        const entry = renderedRef.current.get(spread)
+        const object = doc.objects[spread]
+        if (entry && object && isStated(object)) settleWindows(entry, object, fits)
       }
       // Restore Fabric's selection to match the store.
       syncSelectionToCanvas(canvas, renderedRef.current, editingRef.current)
@@ -300,10 +296,10 @@ export function EditorCanvas() {
      * inside, its members are selectable objects with their own controls.
      */
     /*
-     * And `spreadFrame`, which changes how many groups a frame is; `fits`
+     * And `spread`, which changes how many groups a frame is; `fits`
      * arrives with the text paths and is what each window is settled with.
      */
-  }, [textPaths, bandPaths, ribbons, fits, mosaicStates, insideFrame, spreadFrame])
+  }, [textPaths, bandPaths, ribbons, fits, mosaicStates, insideFrame, spread])
 
   /* --------------------------------------------------- selection sync */
   useEffect(() => {
@@ -336,7 +332,7 @@ export function EditorCanvas() {
          */
         const picked = active.find((o) => o.get('memberId'))
         const parent = picked?.group as { get?: (key: string) => unknown } | undefined
-        const frameId = parent?.get?.('frameId')
+        const frameId = parent?.get?.('statedId')
         const at = parent?.get?.('stateIndex')
         if (members.length > 0 && typeof frameId === 'string' && typeof at === 'number') {
           useUiStore.getState().setFramePick(frameId, members, at)
@@ -347,19 +343,26 @@ export function EditorCanvas() {
       }
 
       /*
-       * A spread window is the frame. Only the first window carries the
-       * frame's `shapeId`; the others carry its `frameId` and nothing else, so
-       * a press on their ground used to read as a press on nothing and
-       * deselected the frame you had just spread out to look at.
+       * A spread window is the object. Only the first window carries the
+       * object's `shapeId`; the others carry its `statedId` and nothing else,
+       * so a press on their ground used to read as a press on nothing and
+       * deselected the object you had just spread out to look at.
        */
       const ids = [
         ...new Set(
           active
-            .map((o) => (o.get('shapeId') ?? o.get('frameId')) as string | undefined)
+            .map((o) => (o.get('shapeId') ?? o.get('statedId')) as string | undefined)
             .filter((id): id is string => Boolean(id)),
         ),
       ]
       useDocumentStore.getState().setSelection(ids)
+      /*
+       * A row lives while its object is selected. Picking something else is
+       * "done looking": the plate, the chips and the bar all follow the
+       * selection, and a row with none of them is a row nobody asked for.
+       */
+      const ui = useUiStore.getState()
+      if (ui.spread && !ids.includes(ui.spread)) ui.setSpread(null)
     }
 
     const onCleared = (): void => {
@@ -428,7 +431,7 @@ export function EditorCanvas() {
        * still is the frame it belongs to, which its parent names.
        */
       const id = target?.get('memberId')
-        ? (parent?.get?.('frameId') as string | undefined)
+        ? (parent?.get?.('statedId') as string | undefined)
         : (target?.get('shapeId') as string | undefined)
       const ui = useUiStore.getState()
       if (!id) return
@@ -982,7 +985,8 @@ export function EditorCanvas() {
        */
       if (ui.editingPoints) return
 
-      const id = opt.target?.get('shapeId') as string | undefined
+      // A further window of a spread carries no `shapeId`, only whose it is.
+      const id = (opt.target?.get('shapeId') ?? opt.target?.get('statedId')) as string | undefined
       const object = id ? store.doc.objects[id] : undefined
       if (!id || !object) return
 
@@ -1023,7 +1027,12 @@ export function EditorCanvas() {
         ui.setInsideFrame(id)
 
         const at = canvas.getScenePoint(opt.e)
-        const group = renderedRef.current.get(id)?.group
+        // Measured in the WINDOW that was pressed, which is where its members
+        // are; window 0 only when the press did not name one.
+        const group =
+          opt.target?.get('statedId') === id
+            ? (opt.target as Group)
+            : renderedRef.current.get(id)?.group
         const boxes = memberBoxes(group)
         const landed = [...object.members].reverse().find((member) => {
           const box = boxes.get(member.id)
@@ -1039,20 +1048,24 @@ export function EditorCanvas() {
       }
 
       if (object.kind === 'mosaic') {
-        const at = pointArtboardToObject(object.transform, canvas.getScenePoint(opt.e))
         /*
-         * Against the state on show, not state 0 — a mosaic paused on a later
-         * state draws those tiles, and that is what the double-click was aimed
-         * at. Clamped, because the picker's index is ephemeral and can outlive
-         * the state it named.
+         * Against the state the pressed WINDOW draws, which its stamp says —
+         * collapsed there is one window and it draws the shown state, so the
+         * stamp and the store agree; spread, the window pressed is the state
+         * that gets the caret, and the point is read in that window's space.
+         * Clamped, because an index can outlive the state it named.
          */
+        const stamped = opt.target?.get('stateIndex')
         const shown = Math.min(
-          useUiStore.getState().mosaicStates[id] ?? 0,
+          typeof stamped === 'number' ? stamped : (useUiStore.getState().mosaicStates[id] ?? 0),
           object.states.length - 1,
         )
+        const window = useUiStore.getState().spread === id ? shown : 0
+        const at = pointArtboardToObject(windowTransform(object, window), canvas.getScenePoint(opt.e))
         const leaf = tileAt(object, at, shown) ?? firstTile(object, shown)
         if (!leaf) return
         store.setSelection([id])
+        showState(object, shown)
         ui.setTyping({ object: id, leaf })
         return
       }
@@ -1258,9 +1271,8 @@ export function EditorCanvas() {
    * `MosaicLayer` hit-tests those itself, which is why it read as "only one
    * glyph can be selected" while everything else had quietly gone dead.
    */
-  /** The frame selected as a whole, if one is — through the one selection rule. */
+  /** The object with states selected as a whole, if one is — through the one selection rule. */
   const { stated } = useSelectedObject()
-  const selectedFrame = stated?.kind === 'frame' ? stated : undefined
   /** The frame being worked inside, which owns the canvas while it is. */
   const openFrame = (() => {
     const found = insideFrame ? objectsById[insideFrame] : undefined
@@ -1295,11 +1307,13 @@ export function EditorCanvas() {
    * so the frame's transform alone put the handles a row-step away from the
    * shape they belong to.
    */
-  const memberHost = (() => {
-    if (!openFrame) return undefined
-    if (spreadFrame !== openFrame.id) return openFrame.transform
-    const at = Math.min(mosaicStates[openFrame.id] ?? 0, openFrame.states.length - 1)
-    return { ...openFrame.transform, x: openFrame.transform.x + windowOffset(openFrame, at) }
+  const memberHost = openFrame
+    ? windowTransform(openFrame, shownWindow(openFrame, { spread, mosaicStates }))
+    : undefined
+  /** The object laid out as a row, if any — whichever kind it is. */
+  const spreadObject = (() => {
+    const found = spread ? objectsById[spread] : undefined
+    return found && isStated(found) ? found : undefined
   })()
 
   const inside = editing || Boolean(editedMosaic) || Boolean(insideFrame)
@@ -1325,9 +1339,15 @@ export function EditorCanvas() {
     if (editingPoints && !editing) useUiStore.getState().setEditingPoints(null)
   }, [editingPoints, editing])
 
+  // A row folds when its object stops being selected from ANYWHERE — the
+  // layers panel, a delete, an undo — not only from a press on the canvas.
+  useEffect(() => {
+    if (spread && !selection.includes(spread)) useUiStore.getState().setSpread(null)
+  }, [selection, spread])
+
   useAnimationLoop(fabricRef, renderedRef)
   useMosaicPlayback(fabricRef, renderedRef)
-  useFramePlayback(fabricRef, renderedRef, fits, spreadFrame)
+  useFramePlayback(fabricRef, renderedRef, fits, spread)
 
   /* ------------------------------------------------- tool -> cursor */
   const tool = useUiStore((s) => s.tool)
@@ -1338,13 +1358,20 @@ export function EditorCanvas() {
     const canvas = fabricRef.current
     if (!canvas) return
 
-    applyCanvasMode(canvas, activeTool, inside, Boolean(insideFrame) && !editingMemberPoints, insideFrame)
+    applyCanvasMode(
+      canvas,
+      activeTool,
+      inside,
+      Boolean(insideFrame) && !editingMemberPoints,
+      insideFrame,
+      spread !== null,
+    )
     applyingRef.current = true
     syncSelectionToCanvas(canvas, renderedRef.current, inside)
     applyColourGuard(canvas, colouringId)
     applyingRef.current = false
     canvas.requestRenderAll()
-  }, [activeTool, inside, colouringId, insideFrame, editingMemberPoints])
+  }, [activeTool, inside, colouringId, insideFrame, editingMemberPoints, spread])
 
   /* --------------------------------------- external viewport changes */
   const zoom = useUiStore((s) => s.zoom)
@@ -1386,8 +1413,8 @@ export function EditorCanvas() {
         unless you are in one, the same as the layers above it.
       */}
       <FrameLayer canvas={fabricRef.current} object={openFrame} />
-      {/* The plate under the frame you have hold of: the open one, or the selected one. */}
-      <FramePlate canvas={fabricRef.current} object={openFrame ?? selectedFrame} />
+      {/* The plate under the thing with states you have hold of: the open frame, or the selection. */}
+      <FramePlate canvas={fabricRef.current} object={openFrame ?? stated} />
       {/*
         The bar under the selected object — play, its states, the spread. HTML
         rather than canvas so it keeps one size at every zoom and can take a
@@ -1395,8 +1422,11 @@ export function EditorCanvas() {
         even while nothing is selected.
       */}
       <ObjectBar canvas={fabricRef.current} inside={editedMosaic} />
-      {/* The number over each window while a frame is spread. */}
-      <SpreadChips canvas={fabricRef.current} object={openFrame} />
+      {/* What a press means on a row, for every kind; and the number over each window. */}
+      <SpreadLayer canvas={fabricRef.current} object={spreadObject} />
+      <SpreadChips canvas={fabricRef.current} object={spreadObject} />
+      {/* The selected object's name, above it. */}
+      <ObjectLabel canvas={fabricRef.current} />
     </div>
   )
 }
@@ -1469,6 +1499,8 @@ function applyCanvasMode(
   inFrame = false,
   /** The frame being worked inside, which stays selectable while every other object steps back. */
   openFrame: string | null = null,
+  /** An object laid out as a row: a view you look at, not a field to lasso across. */
+  spread = false,
 ): void {
   const drawing = activeTool === 'draw'
   const panning = activeTool === 'pan'
@@ -1480,7 +1512,7 @@ function applyCanvasMode(
   // placed, handles are being taken hold of.
   const crosshair = drawing || penning || mosaicking || framing
 
-  canvas.selection = activeTool === 'select' && !editing
+  canvas.selection = activeTool === 'select' && !editing && !spread
   canvas.defaultCursor = panning ? 'grab' : crosshair ? 'crosshair' : 'default'
   canvas.hoverCursor = panning ? 'grab' : crosshair ? 'crosshair' : 'move'
   /*
@@ -1499,7 +1531,7 @@ function applyCanvasMode(
     if (!o.get('shapeId')) return
     // Held back by being inside something — unless it IS the frame you are
     // inside, whose ground is how it is moved and resized from in there.
-    const held = editing && !(inFrame && openFrame !== null && o.get('frameId') === openFrame)
+    const held = editing && !(inFrame && openFrame !== null && o.get('statedId') === openFrame)
     o.set({ selectable: activeTool === 'select' && !held })
   })
   /*
@@ -1532,7 +1564,7 @@ export function readMemberTransform(
    * would make the answer depend on event order.
    */
   const parent = child.group as { get?: (key: string) => unknown } | undefined
-  const frameId = parent?.get?.('frameId')
+  const frameId = parent?.get?.('statedId')
   const stamped = parent?.get?.('stateIndex')
   if (!memberId || typeof frameId !== 'string' || typeof stamped !== 'number') return null
   const frame = useDocumentStore.getState().doc.objects[frameId]
@@ -1739,13 +1771,14 @@ function useMosaicPlayback(
   const playback = useUiStore((s) => s.mosaicPlayback)
   const shownStates = useUiStore((s) => s.mosaicStates)
   const globalPlaying = useUiStore((s) => s.playing)
+  const spread = useUiStore((s) => s.spread)
   const doc = useDocumentStore((s) => s.doc)
 
   const liveRef = useRef({ doc, shownStates })
   liveRef.current = { doc, shownStates }
 
   const previewing = playback?.playing === true ? (playback.object ?? null) : null
-  const { ids, shared } = animatingMosaicIds(doc, { playing: globalPlaying, previewing })
+  const { ids, shared } = animatingMosaicIds(doc, { playing: globalPlaying, previewing, spread })
   const from = shared ? 0 : (playback?.atMs ?? 0)
   // The effect restarts only when the SET changes, not on every document edit.
   const key = ids.join(',')
@@ -1845,7 +1878,9 @@ function useMosaicPlayback(
         const wall = from + (performance.now() - epoch)
         // Speed converts wall time into authored time. The evaluator itself
         // knows nothing about it, so a boundary is the same moment at any rate.
-        const frame = evaluateMosaicAtTime(object, authoredTimeFor(object, wall))
+        const authored = authoredTimeFor(object, wall)
+        setPlayhead(id, authored)
+        const frame = evaluateMosaicAtTime(object, authored)
         paintMosaicFrame(group, frame, references.get(id) ?? new Map(), object.localBounds)
         painted = true
       }
@@ -1856,6 +1891,7 @@ function useMosaicPlayback(
 
     return () => {
       cancelAnimationFrame(handle)
+      clearPlayhead(animating)
       const ui = useUiStore.getState()
       /*
        * Where the panel's clock got to, so pressing play again resumes rather
@@ -1935,8 +1971,8 @@ function useFramePlayback(
       const hit = opt.target
       const parent = hit?.group as { get?: (key: string) => unknown } | undefined
       const frameId = hit?.get('memberId')
-        ? (parent?.get?.('frameId') as string | undefined)
-        : (hit?.get('frameId') as string | undefined)
+        ? (parent?.get?.('statedId') as string | undefined)
+        : (hit?.get('statedId') as string | undefined)
       if (!frameId || !animating.includes(frameId)) return
       const object = liveRef.current.objects[frameId]
       const group = renderedRef.current?.get(frameId)?.group
@@ -1987,7 +2023,9 @@ function useFramePlayback(
         if (!object || object.kind !== 'frame') continue
         // Wall time into authored time, which is where speed comes in — the
         // evaluator itself only ever sees the timeline as written.
-        paint(object, frameAuthoredTimeFor(object, from + (now - epoch)), now)
+        const authored = frameAuthoredTimeFor(object, from + (now - epoch))
+        setPlayhead(id, authored)
+        paint(object, authored, now)
       }
       canvas.requestRenderAll()
       handle = requestAnimationFrame(tick)
@@ -1996,6 +2034,7 @@ function useFramePlayback(
 
     return () => {
       cancelAnimationFrame(handle)
+      clearPlayhead(animating)
       /*
        * Put every frame back on the state being edited, so stopping leaves the
        * arrangement somebody is working on rather than wherever the clock

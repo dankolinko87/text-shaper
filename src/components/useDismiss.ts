@@ -12,16 +12,22 @@ import { useEffect, type RefObject } from 'react'
  * differently — which is exactly the sort of difference nobody notices until one
  * of them is stuck open. `close` should be stable (a `useCallback`), or the
  * listeners are re-bound on every render.
+ *
+ * `also` is for a popover rendered through a portal: it lives outside the
+ * control it hangs from, so a press inside it would otherwise read as a press
+ * outside. Such a popover names both.
  */
 export function useDismiss(
   open: boolean,
   close: () => void,
   ref: RefObject<HTMLElement | null>,
+  also?: RefObject<HTMLElement | null>,
 ): void {
   useEffect(() => {
     if (!open) return
     const onDown = (e: MouseEvent): void => {
-      if (!ref.current?.contains(e.target as Node)) close()
+      const target = e.target as Node
+      if (!ref.current?.contains(target) && !also?.current?.contains(target)) close()
     }
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') close()
@@ -32,5 +38,5 @@ export function useDismiss(
       document.removeEventListener('mousedown', onDown)
       document.removeEventListener('keydown', onKey)
     }
-  }, [open, close, ref])
+  }, [open, close, ref, also])
 }

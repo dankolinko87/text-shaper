@@ -6,7 +6,7 @@ import { useUiStore } from '../state/uiStore'
 import type { FrameObject } from '../types/document'
 import { selectionColour } from './colours'
 import { frameCorners } from './frameBoxes'
-import { doublePressOutside, pressOutside } from './frameStates'
+import { pressOutside } from './stated'
 import { windowOffset } from './renderer'
 import { outlineToPath, pathToOutline } from '../geometry/outline'
 
@@ -47,7 +47,7 @@ export function FrameLayer({
    */
   const editingPoints = useUiStore((s) => s.editingPoints)
   const shown = useUiStore((s) => s.mosaicStates[frame?.id ?? ''] ?? 0)
-  const spread = useUiStore((s) => Boolean(frame) && s.spreadFrame === frame?.id)
+  const spread = useUiStore((s) => Boolean(frame) && s.spread === frame?.id)
   const shapesRef = useRef<FabricObject[]>([])
 
   const active = Boolean(frame) && inside === frame?.id
@@ -164,7 +164,7 @@ export function FrameLayer({
        * document's box here called a press on the overhang a press outside.
        */
       const hit = opt.target as { get?: (key: string) => unknown } | undefined
-      if (hit?.get?.('frameId') === target.id) {
+      if (hit?.get?.('statedId') === target.id) {
         useUiStore.getState().setFrameSelection([])
         return
       }
@@ -229,13 +229,12 @@ export function FrameLayer({
       const target = live()
       if (!target) return
       /*
-       * On the ground OUTSIDE a spread frame, this folds the row. Every window
-       * carries the frame's id, so "outside" is a press that hit none of them.
+       * Off the frame's ground there is nothing here to go into. Whether the
+       * row folds is `SpreadLayer`'s question, asked once for every kind.
        */
-      const ground = opt.target as { get?: (key: string) => unknown } | undefined
-      if ((!ground || ground.get?.('frameId') !== target.id) && doublePressOutside(target.id)) {
-        return
-      }
+      const pressed = opt.target as (FabricObject & { group?: FabricObject }) | undefined
+      const owner = pressed?.get('statedId') ?? pressed?.group?.get('statedId')
+      if (owner !== target.id) return
       /*
        * Which member: whatever Fabric has hold of.
        *

@@ -64,6 +64,68 @@ function forEachFrame(raw: Record<string, unknown>, fn: (o: Record<string, unkno
 }
 
 /**
+ * Every typography object in a raw document: the ones on the page, and the
+ * ones a frame holds as members — which live inside the frame, not in
+ * `objects`, and are missed by anything that only walks the page.
+ */
+function forEachTypography(
+  raw: Record<string, unknown>,
+  fn: (o: Record<string, unknown>) => void,
+): void {
+  const objects = raw['objects']
+  if (!objects || typeof objects !== 'object') return
+  for (const value of Object.values(objects as Record<string, unknown>)) {
+    if (!value || typeof value !== 'object') continue
+    const object = value as Record<string, unknown>
+    if (object['kind'] === 'typography') fn(object)
+    if (object['kind'] !== 'frame' || !Array.isArray(object['members'])) continue
+    for (const member of object['members'] as unknown[]) {
+      const own = (member as { object?: unknown } | null)?.object
+      if (own && typeof own === 'object' && (own as Record<string, unknown>)['kind'] === 'typography') {
+        fn(own as Record<string, unknown>)
+      }
+    }
+  }
+}
+
+/**
+ * A gradient that predates stops: the part's own colour blending to one other.
+ *
+ * Written as the two stops that draw the same picture. `to` is read exactly
+ * as the painter read it — six digits or the default — so nothing changes on
+ * screen; the base is the part's resting colour, which is what stop 0 was.
+ */
+function stopsFromTwoColours(object: Record<string, unknown>): void {
+  const animation = object['animation']
+  const appearance = object['appearance']
+  if (!animation || typeof animation !== 'object' || !appearance || typeof appearance !== 'object') return
+  const paints = appearance as Record<string, unknown>
+  const textBase = typeof paints['textFill'] === 'string' ? paints['textFill'] : '#101014'
+  const shapeBase = typeof paints['containerFill'] === 'string' ? paints['containerFill'] : textBase
+  for (const [key, base] of [
+    ['textColour', textBase],
+    ['shapeColour', shapeBase],
+  ] as const) {
+    const settings = (animation as Record<string, unknown>)[key]
+    if (!settings || typeof settings !== 'object') continue
+    const colour = settings as Record<string, unknown>
+    if (colour['effect'] !== 'gradient') continue
+    const config = (colour['config'] ?? {}) as Record<string, unknown>
+    if (Array.isArray(config['stops'])) continue
+    const to =
+      typeof config['to'] === 'string' && /^#[0-9a-f]{6}$/i.test(config['to'].trim())
+        ? config['to'].trim()
+        : '#e0552f'
+    config['stops'] = [
+      { at: 0, colour: base },
+      { at: 1, colour: to },
+    ]
+    delete config['to']
+    colour['config'] = config
+  }
+}
+
+/**
  * A frame that arrives missing something it needs.
  *
  * Idempotent and gap-filling only, like `completeMosaic` — which is also what
@@ -435,6 +497,18 @@ function completeMosaic(object: Record<string, unknown>): void {
 }
 
 export const migrations: Record<number, MigrationFn> = {
+  /*
+   * v29 -> v30: a gradient is its own list of stops.
+   *
+   * It used to be the part's colour blending to one other, with the first
+   * colour never shown as a stop. Every saved gradient becomes the two stops
+   * that draw the same picture; cycle and flicker keep their one second colour.
+   */
+  29: (raw) => {
+    forEachTypography(raw, (object) => stopsFromTwoColours(object))
+    return raw
+  },
+
   /*
    * v28 -> v29: a frame's states say only what was authored in them.
    *

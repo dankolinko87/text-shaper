@@ -1,3 +1,5 @@
+import { useId } from 'react'
+
 import { ColorField, SegmentedControl, Slider } from '../components/controls'
 import type { AnimationControl } from '../typography/animation'
 import './panels.css'
@@ -10,29 +12,37 @@ import './panels.css'
  * effect anywhere means adding it to a list — no panel changes at all.
  */
 
-export function PresetGrid({
+/**
+ * Which preset is on: a labelled dropdown, the same control the font uses.
+ *
+ * A grid of chips read as a set of unrelated buttons and never said what it
+ * was a choice OF; a select under a label does, and it is the one way of
+ * choosing from a list this panel has, wherever the list appears.
+ */
+export function PresetSelect({
+  label,
   options,
   value,
   onChange,
 }: {
+  label: string
   options: readonly { id: string; label: string }[]
   value: string
   onChange: (id: string) => void
 }) {
+  const id = useId()
   return (
-    <div className="field field--stack">
-      <div className="preset-grid">
+    <div className="field">
+      <label className="field__label" htmlFor={id}>
+        {label}
+      </label>
+      <select id={id} className="input" value={value} onChange={(e) => onChange(e.target.value)}>
         {options.map((option) => (
-          <button
-            key={option.id}
-            type="button"
-            className={`preset-chip${option.id === value ? ' preset-chip--active' : ''}`}
-            onClick={() => onChange(option.id)}
-          >
+          <option key={option.id} value={option.id}>
             {option.label}
-          </button>
+          </option>
         ))}
-      </div>
+      </select>
     </div>
   )
 }
@@ -51,13 +61,15 @@ export function ControlList({
   onCommit,
 }: {
   controls: readonly AnimationControl[]
-  config: Record<string, number | string>
+  config: Readonly<Record<string, unknown>>
   onChange: (key: string, value: number | string) => void
   onCommit: (label: string) => () => void
 }) {
+  // A control hidden by its own `when` is absent, not disabled.
+  const shown = controls.filter((control) => !control.when || control.when(config))
   return (
     <>
-      {controls.map((control) =>
+      {shown.map((control) =>
         control.kind === 'choice' ? (
           <SegmentedControl
             key={control.key}

@@ -1,11 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 
-import { Button, ColorField, IconButton, Slider, StrokeField, Tooltip } from '../components/controls'
+import { Button, ColorField, Slider, StrokeField, Tooltip } from '../components/controls'
 import { Icon } from '../components/Icon'
 import { FONTS } from '../fonts/manifest'
 import { canReshape } from '../mosaic/boundaries'
 import { gridRanks, sameGeometry } from '../mosaic/dissection'
-import { EASING_LABELS, EASING_PRESETS } from '../anim/easing'
 import { graphemeSupport } from '../mosaic/glyph'
 import { contentBounds } from '../mosaic/layout'
 import { maximumGap, maximumGlyphInset, maximumOuterPadding } from '../mosaic/spacing'
@@ -17,27 +16,22 @@ import {
   mosaicSpacing,
 } from '../mosaic/tiles'
 import { DEFAULT_OUTLINE } from '../geometry/stroke'
-import { formatDuration, playbackDuration } from '../mosaic/timeline'
 import { documentDefaults } from '../state/defaults'
 import { useDocumentStore } from '../state/documentStore'
 import { useUiStore } from '../state/uiStore'
 import type { LetterMosaicObject } from '../types/document'
 import type { PositionedStroke } from '../types/document'
-import type { MosaicCorners, MosaicEasing, MosaicState } from '../types/mosaic'
+import type { MosaicCorners, MosaicState } from '../types/mosaic'
 import {
   DEFAULT_GLYPH_COLOUR,
   MOSAIC_DEFAULT_CORNERS,
   MOSAIC_DEFAULT_SPACING,
-  MOSAIC_MAX_STATES,
-  MOSAIC_MIN_STATES,
-  MOSAIC_MIN_TRANSITION_MS,
   X_MAX,
   Y_MAX,
 } from '../types/mosaic'
 import { GridSizeField } from './GridSizeField'
-import { deleteStateAt, duplicateStateAt, moveStateTo, showMosaicState } from './mosaicStates'
 import { Section, ColourChip, StrokeChip } from './Section'
-import { StateThumbnail } from './StateThumbnail'
+import { StateTimingFields } from './StateTimingFields'
 import { TilePicker } from './TilePicker'
 import './panels.css'
 
@@ -62,324 +56,28 @@ import './panels.css'
 
 /** How long the accent stays on a control that refused a value. */
 const LIMIT_FLASH_MS = 900
-/**
- * How far a press on a state's row must travel before it is a reorder.
- *
- * The row is both the thing you press to open a state and the thing you grab to
- * move one, so the press cannot decide on its own — the same rule the canvas
- * uses for a press that might be a click or might be a resize.
- */
-const DRAG_SLOP_PIXELS = 4
-/**
- * The preview, in pixels.
- *
- * Big enough that the letters read. Below about fifty a glyph is five pixels of
- * mush and the thumbnail says only "a mosaic", which the panel already said.
- */
-const THUMB = 64
-
 type SpacingKey = 'gap' | 'outerPadding' | 'glyphInset'
 type Part = 'tiles' | 'glyphs' | 'backdrop' | 'border' | 'timing'
 
-export function StateList({ object }: { object: LetterMosaicObject }) {
-  const shown = useUiStore((s) => s.mosaicStates[object.id] ?? 0)
-  const count = object.states.length
-  const at = Math.min(Math.max(0, shown), count - 1)
-
-  /*
-   * What is unfolded, kept apart from what is SHOWN.
-   *
-   * These were the same thing to begin with — the open card was the state on
-   * the canvas — which made the list an accordion: one card was always open and
-   * there was no way to close the last one, because clicking it only asked to
-   * show a state that was already showing.
-   *
-   * So opening a card still shows its state, but closing one leaves the canvas
-   * where it is, and every card can be shut at once. Which state is on show is
-   * then marked on the card itself rather than implied by its being open.
-   *
-   * Held by state ID rather than index, so duplicating or deleting a state does
-   * not silently transfer "open" to whichever state slid into that slot.
-   */
-  const [openStates, setOpenStates] = useState<ReadonlySet<string>>(
-    () => new Set(object.states[at] ? [object.states[at].id] : []),
-  )
-  const [openParts, setOpenParts] = useState<ReadonlySet<string>>(
-    () => new Set(object.states[at] ? [`${object.states[at].id}:tiles`] : []),
-  )
-
-  const toggleState = (id: string, index: number): void => {
-    /*
-     * The canvas is told OUTSIDE the updater, not inside it.
-     *
-     * A state updater is called during render, and React may call it twice —
-     * so writing to another store from in there is a store write in the render
-     * phase, which React reports as updating one component while rendering
-     * another. Decide here, where this is an event handler and the write is
-     * plainly an effect of the click.
-     */
-    const opening = !openStates.has(id)
-    setOpenStates((was) => {
-      const next = new Set(was)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
-    // Opening one is asking to work on it, so the canvas follows. Closing is
-    // not — it says nothing about which state you want to look at.
-    if (opening) showMosaicState(object, index)
-    // A card opened for the first time lands on Tiles rather than on four shut
-    // lids, which is a card that has told you nothing for the click.
-    setOpenParts((was) =>
-      [...was].some((key) => key.startsWith(`${id}:`)) ? was : new Set([...was, `${id}:tiles`]),
-    )
-  }
-
-  /*
-   * Navigating on the canvas carries the open card with it.
-   *
-   * Stepping through states with the pill under the mosaic is how you compare
-   * compositions, and arriving at one whose card is shut means opening it by
-   * hand every time — which is what the accordion did for you.
-   *
-   * Only when something is already open, though. With the list collapsed,
-   * stepping through is LOOKING, and forcing a card open would undo the
-   * collapse the moment you used the canvas.
-   *
-   * The state being left is the one that closes, so cards opened deliberately
-   * beside it stay where they are, and whichever sections were open travel
-   * across — arrow through with Timing unfolded and you are comparing timings.
-   */
-  const previous = useRef(at)
-  useEffect(() => {
-    const from = previous.current
-    if (from === at) return
-    previous.current = at
-    const left = object.states[from]?.id
-    const arrived = object.states[at]?.id
-    if (!arrived) return
-
-    setOpenStates((was) => {
-      if (was.size === 0) return was
-      const next = new Set(was)
-      if (left) next.delete(left)
-      next.add(arrived)
-      return next
-    })
-
-    setOpenParts((was) => {
-      if (!left) return was
-      const mine = [...was].filter((key) => key.startsWith(`${left}:`))
-      if (mine.length === 0) return was
-      const next = new Set([...was].filter((key) => !key.startsWith(`${left}:`)))
-      for (const key of mine) next.add(`${arrived}:${key.slice(left.length + 1)}`)
-      return next
-    })
-  }, [at, object.states])
-
-  /*
-   * A drag in flight: which card was picked up, and where it would land.
-   *
-   * Owned by the LIST rather than by a card, because a drag is a relationship
-   * between two of them — the card being dragged cannot know what it is over,
-   * and the card underneath cannot know what is coming.
-   *
-   * `into` is an insertion POINT, not a card index: it runs 0…count, so the
-   * gap after the last card is expressible. Turning that into a destination
-   * index is `landing()` below, and the two differ whenever a card is moved
-   * downward, because removing it first shifts everything after it up one.
-   */
-  const listRef = useRef<HTMLUListElement>(null)
-  const [drag, setDrag] = useState<{ from: number; startY: number; moved: boolean } | null>(null)
-  const [into, setInto] = useState<number | null>(null)
-  /*
-   * A drag that has actually moved must not also count as a click.
-   *
-   * The row is both the thing you press to open a state and the thing you grab
-   * to move one, and `click` fires after `pointerup` — so without this, letting
-   * go of a card you just dragged would open it as well.
-   */
-  const draggedRef = useRef(false)
-
-  /** Which gap the pointer is in: 0 is above the first card, `count` past the last. */
-  const gapAt = (y: number): number => {
-    const cards = [...(listRef.current?.children ?? [])] as HTMLElement[]
-    for (let i = 0; i < cards.length; i++) {
-      // The ROW's midpoint, not the card's. An open card is several hundred
-      // pixels tall, and measuring its middle would put the gap above it
-      // somewhere down inside its own controls.
-      const card = cards[i]
-      if (!card) continue
-      const box = (card.firstElementChild ?? card).getBoundingClientRect()
-      if (y < box.top + box.height / 2) return i
-    }
-    return cards.length
-  }
-
-  useEffect(() => {
-    if (!drag) return
-
-    const move = (e: PointerEvent): void => {
-      if (!drag.moved) {
-        // Held, not started — the same rule the canvas uses for a press that
-        // might be a click. Below this it was a press on the row.
-        if (Math.abs(e.clientY - drag.startY) < DRAG_SLOP_PIXELS) return
-        setDrag((was) => (was ? { ...was, moved: true } : was))
-        draggedRef.current = true
-      }
-      setInto(gapAt(e.clientY))
-    }
-
-    const abandon = (): void => {
-      setDrag(null)
-      setInto(null)
-    }
-
-    const finish = (): void => {
-      // `into` is an insertion POINT in the list as it stands; the destination
-      // index is one lower when the card is moving down, because taking it out
-      // first shifts everything after it up.
-      if (drag.moved && into !== null) {
-        moveStateTo(object, drag.from, into > drag.from ? into - 1 : into)
-      }
-      abandon()
-    }
-
-    const key = (e: KeyboardEvent): void => {
-      if (e.key !== 'Escape') return
-      e.preventDefault()
-      /*
-       * And it stops here.
-       *
-       * Escape means "call off the thing in flight", and the thing in flight is
-       * this drag. Left to carry on, it also reached the editor's own Escape —
-       * which clears the selection — so calling off a reorder threw away the
-       * mosaic you were working on and took the panel with it.
-       *
-       * Capture phase for the same reason: the editor's handler was bound first
-       * and would otherwise have run before this one had a chance to stop it.
-       */
-      e.stopPropagation()
-      abandon()
-    }
-
-    window.addEventListener('pointermove', move)
-    window.addEventListener('pointerup', finish)
-    /*
-     * A cancelled pointer ABANDONS rather than commits.
-     *
-     * `pointercancel` is the browser saying it has taken the pointer away — a
-     * system gesture, a scroll it decided to own — and it carries no position
-     * anybody chose. Reordering the animation on the strength of that would be
-     * acting on an intent the user never expressed. Escape says the same thing
-     * deliberately, which is how every other drag in this editor is called off.
-     */
-    window.addEventListener('pointercancel', abandon)
-    window.addEventListener('keydown', key, true)
-    return () => {
-      window.removeEventListener('pointermove', move)
-      window.removeEventListener('pointerup', finish)
-      window.removeEventListener('pointercancel', abandon)
-      window.removeEventListener('keydown', key, true)
-    }
-  }, [drag, into, object])
-
-  const togglePart = (key: string): void =>
-    setOpenParts((was) => {
-      const next = new Set(was)
-      if (next.has(key)) next.delete(key)
-      else next.add(key)
-      return next
-    })
-
+/**
+ * What every state shares — the grid the states are cut from and the clock
+ * they play to — folded above the list in the rail. Shut by default: these
+ * are set once, and the states are what the rail is for.
+ */
+export function MosaicSettings({ object }: { object: LetterMosaicObject }) {
+  const [open, setOpen] = useState(false)
   return (
-    <>
-      <div className="states">
-        <header className="states__header">
-          <h3 className="panel__section-title">States</h3>
-          {/*
-            How long a lap takes to WATCH, which is what the play button and an
-            export both produce — so it is the speed's answer, not the sum of
-            the states' own timings. The rate that made it differ is on the
-            Playback lid above, which is also where it is changed.
-          */}
-          <span className="states__length">{formatDuration(playbackDuration(object))}</span>
-          {/*
-            One press back to a list you can read. With a dozen states open the
-            panel is a scroll, and shutting them one at a time is the tax for
-            having looked.
-          */}
-          {openStates.size > 0 ? (
-            <IconButton
-              icon="chevronUp"
-              label="Collapse every state"
-              tooltipSide="top"
-              small
-              onClick={() => {
-                setOpenStates(new Set())
-                setOpenParts(new Set())
-              }}
-            />
-          ) : null}
-          <IconButton
-            icon="plus"
-            label={
-              count >= MOSAIC_MAX_STATES
-                ? `A mosaic holds at most ${MOSAIC_MAX_STATES} states`
-                : 'Add a state'
-            }
-            tooltipSide="top"
-            small
-            disabled={count >= MOSAIC_MAX_STATES}
-            /*
-             * A copy of the one on show, not an empty one. A new state is nearly
-             * always "this again, then I change something", and an empty state
-             * would animate every letter out and back for no reason.
-             */
-            onClick={() => duplicateStateAt(object, at)}
-          />
-        </header>
-
-        <ul className="states__list" ref={listRef}>
-          {object.states.map((state, index) => (
-            <StateCard
-              key={state.id}
-              object={object}
-              at={index}
-              state={state}
-              open={openStates.has(state.id)}
-              shown={index === at}
-              openParts={openParts}
-              onTogglePart={togglePart}
-              onToggle={() => toggleState(state.id, index)}
-              dragging={drag?.moved === true && drag.from === index}
-              /*
-               * Which edge of THIS card the line is drawn on. An insertion
-               * point of `index` is the gap above it; `index + 1` is the gap
-               * below, and only the last card draws that one — otherwise every
-               * gap would be claimed by two neighbours and drawn twice.
-               */
-              dropEdge={
-                drag?.moved !== true || into === null
-                  ? null
-                  : into === index
-                    ? 'above'
-                    : into === index + 1 && index === object.states.length - 1
-                      ? 'below'
-                      : null
-              }
-              onPickUp={(startY) => {
-                draggedRef.current = false
-                setDrag({ from: index, startY, moved: false })
-                setInto(index)
-              }}
-              wasDragged={() => draggedRef.current}
-              onNudge={(by) => moveStateTo(object, index, index + by)}
-            />
-          ))}
-        </ul>
-      </div>
-    </>
+    <div className="panel__grid-section">
+      <Section
+        title="Mosaic settings"
+        summary={`${object.seed.columns} × ${object.seed.rows} · ${Math.round(object.speed * 10) / 10}×`}
+        open={open}
+        onToggle={() => setOpen((was) => !was)}
+      >
+        <GridSection object={object} />
+        <PlaybackSection object={object} />
+      </Section>
+    </div>
   )
 }
 
@@ -396,7 +94,6 @@ export function StateList({ object }: { object: LetterMosaicObject }) {
  * because the states themselves now live in the rail on the other side.
  */
 export function GridSection({ object }: { object: LetterMosaicObject }) {
-  const [open, setOpen] = useState(false)
   const shown = useUiStore((s) => s.mosaicStates[object.id] ?? 0)
   const at = Math.min(Math.max(0, shown), object.states.length - 1)
   const state = object.states[at]
@@ -435,13 +132,7 @@ export function GridSection({ object }: { object: LetterMosaicObject }) {
   )
 
   return (
-    <div className="panel__grid-section">
-      <Section
-        title="Grid"
-        summary={`${object.seed.columns} × ${object.seed.rows}`}
-        open={open}
-        onToggle={() => setOpen((was) => !was)}
-      >
+    <>
         {!reshapable ? (
           <p className="warning" role="status" aria-live="polite">
             <Icon name="warning" size={13} />
@@ -511,8 +202,7 @@ export function GridSection({ object }: { object: LetterMosaicObject }) {
             </div>
           </>
         ) : null}
-      </Section>
-    </div>
+    </>
   )
 }
 
@@ -532,16 +222,9 @@ export function GridSection({ object }: { object: LetterMosaicObject }) {
  */
 /** The clock every state is read against — the object's, not any state's. */
 export function PlaybackSection({ object }: { object: LetterMosaicObject }) {
-  const [open, setOpen] = useState(false)
 
   return (
-    <div className="panel__grid-section">
-      <Section
-        title="Playback"
-        summary={`${Math.round(object.speed * 10) / 10}×`}
-        open={open}
-        onToggle={() => setOpen((was) => !was)}
-      >
+    <>
         <Slider
           label="Speed"
           value={object.speed}
@@ -553,186 +236,62 @@ export function PlaybackSection({ object }: { object: LetterMosaicObject }) {
           onChange={(speed) => useDocumentStore.getState().setMosaicSpeed(object.id, speed)}
           onCommit={commitWith('Change speed')}
         />
-      </Section>
-    </div>
+    </>
   )
 }
 
-/* ----------------------------------------------------------------- one state */
-
-function StateCard({
-  object,
-  at,
-  state,
-  open,
-  shown,
-  openParts,
-  onTogglePart,
-  onToggle,
-  dragging,
-  dropEdge,
-  onPickUp,
-  wasDragged,
-  onNudge,
-}: {
-  object: LetterMosaicObject
-  at: number
-  state: MosaicState
-  open: boolean
-  /** On the canvas right now — which is no longer the same as being unfolded. */
-  shown: boolean
-  openParts: ReadonlySet<string>
-  onTogglePart: (key: string) => void
-  onToggle: () => void
-  /** This card is the one being carried. */
-  dragging: boolean
-  /** Which edge the insertion line belongs on, if any. */
-  dropEdge: 'above' | 'below' | null
-  onPickUp: (startY: number) => void
-  /** Whether the press that is ending turned into a drag, so a click is not one. */
-  wasDragged: () => boolean
-  onNudge: (by: number) => void
-}) {
-  const count = object.states.length
-  const isOpen = (part: Part): boolean => openParts.has(`${state.id}:${part}`)
-  const toggle = (part: Part) => () => onTogglePart(`${state.id}:${part}`)
+/**
+ * The state on show, as the properties panel describes it: its tiles, its
+ * glyphs, its backdrop, its border, its timing. This used to unfold inside
+ * the state's card, which made the list a place to edit in and a place to
+ * read at once and did neither well; the card now names the state, and this
+ * is where the state is worked on.
+ */
+export function MosaicStatePanel({ object, at }: { object: LetterMosaicObject; at: number }) {
+  const [openParts, setOpenParts] = useState<ReadonlySet<Part>>(() => new Set<Part>(['tiles']))
+  const state = object.states[at]
+  if (!state) return null
+  const isOpen = (part: Part): boolean => openParts.has(part)
+  const toggle = (part: Part) => () =>
+    setOpenParts((was) => {
+      const next = new Set(was)
+      if (next.has(part)) next.delete(part)
+      else next.add(part)
+      return next
+    })
 
   return (
-    <li
-      className="state-card"
-      data-open={open}
-      data-shown={shown}
-      data-dragging={dragging}
-      data-drop={dropEdge ?? undefined}
-    >
-      {/*
-        The whole row is the handle, not just the grip.
-        
-        A list of cards is grabbed wherever you land on it — the grip is there
-        to SAY that, not to be the only way in. Pointer events rather than HTML5
-        drag-and-drop: this is the idiom the rest of the editor uses, it works
-        the same on a trackpad and under a finger, and a press only becomes a
-        drag once it has travelled, so the row still opens on a plain click.
-        
-        The buttons at the right opt out below — a press on delete that slid a
-        few pixels should still be a press on delete.
-      */}
-      <div
-        className="state-card__row"
-        onPointerDown={(e) => {
-          if (e.button !== 0) return
-          onPickUp(e.clientY)
-        }}
-      >
-        <span className="state-card__grip" aria-hidden="true">
-          <Icon name="grip" size={13} />
-        </span>
-        <button
-          type="button"
-          className="state-card__open"
-          aria-expanded={open}
-          onClick={() => {
-            // The click that ends a real drag is not a click on the row.
-            if (wasDragged()) return
-            onToggle()
-          }}
-          /*
-           * Reorderable without a mouse. A drag is the only way to say "put
-           * this third" with a pointer, but it must not be the only way at all
-           * — so the row that opens a state also moves it, one place per press.
-           */
-          onKeyDown={(e) => {
-            if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return
-            if (!e.altKey) return
-            e.preventDefault()
-            onNudge(e.key === 'ArrowUp' ? -1 : 1)
-          }}
-        >
-          <span className="lid-chevron" data-open={open}>
-            <Icon name="chevronRight" size={13} />
-          </span>
-          <StateThumbnail object={object} at={at} size={THUMB} />
-          <span className="state-card__meta">
-            <span className="state-card__name">State {at + 1}</span>
-            <span className="state-card__timing">
-              {Math.round(state.holdMs)} · {Math.round(state.transitionMs)} ms
-            </span>
-            <span className="state-card__easing">{EASING_LABELS[state.easing]}</span>
-          </span>
-        </button>
-
-        {/*
-          On the row, because they act on the state the row names. Buried in a
-          tab they were unreachable from the other two and read as animation
-          settings; here they cost no expansion at all.
-        */}
-        <div className="state-card__actions" onPointerDown={(e) => e.stopPropagation()}>
-          <IconButton
-            icon="duplicate"
-            label={
-              count >= MOSAIC_MAX_STATES
-                ? `A mosaic holds at most ${MOSAIC_MAX_STATES} states`
-                : 'Duplicate this state'
-            }
-            tooltipSide="top"
-            small
-            disabled={count >= MOSAIC_MAX_STATES}
-            onClick={() => duplicateStateAt(object, at)}
-          />
-          <IconButton
-            icon="trash"
-            label={
-              count <= MOSAIC_MIN_STATES
-                ? `An animation needs at least ${MOSAIC_MIN_STATES} states`
-                : 'Delete this state'
-            }
-            tooltipSide="top"
-            small
-            disabled={count <= MOSAIC_MIN_STATES}
-            onClick={() => deleteStateAt(object, at)}
-          />
-        </div>
-      </div>
-
-      {open ? (
-        <div className="state-card__body">
-          <TilesSection
-            object={object}
-            at={at}
-            open={isOpen('tiles')}
-            onToggle={toggle('tiles')}
-          />
-          <GlyphsSection
-            object={object}
-            at={at}
-            state={state}
-            open={isOpen('glyphs')}
-            onToggle={toggle('glyphs')}
-          />
-          <BackdropSection
-            object={object}
-            at={at}
-            state={state}
-            open={isOpen('backdrop')}
-            onToggle={toggle('backdrop')}
-          />
-          <BorderSection
-            object={object}
-            at={at}
-            state={state}
-            open={isOpen('border')}
-            onToggle={toggle('border')}
-          />
-          <TimingSection
-            object={object}
-            at={at}
-            state={state}
-            open={isOpen('timing')}
-            onToggle={toggle('timing')}
-          />
-        </div>
-      ) : null}
-    </li>
+    <>
+      <TilesSection object={object} at={at} open={isOpen('tiles')} onToggle={toggle('tiles')} />
+      <GlyphsSection
+        object={object}
+        at={at}
+        state={state}
+        open={isOpen('glyphs')}
+        onToggle={toggle('glyphs')}
+      />
+      <BackdropSection
+        object={object}
+        at={at}
+        state={state}
+        open={isOpen('backdrop')}
+        onToggle={toggle('backdrop')}
+      />
+      <BorderSection
+        object={object}
+        at={at}
+        state={state}
+        open={isOpen('border')}
+        onToggle={toggle('border')}
+      />
+      <TimingSection
+        object={object}
+        at={at}
+        state={state}
+        open={isOpen('timing')}
+        onToggle={toggle('timing')}
+      />
+    </>
   )
 }
 
@@ -1262,8 +821,6 @@ function TimingSection({
   open: boolean
   onToggle: () => void
 }) {
-  const store = () => useDocumentStore.getState()
-
   return (
     <Section
       title="Timing"
@@ -1271,55 +828,7 @@ function TimingSection({
       open={open}
       onToggle={onToggle}
     >
-      {/*
-        How long this composition rests before it starts moving. Zero is a mosaic
-        that never stops, which is usually what you want.
-      */}
-      <Slider
-        label="Hold"
-        value={state.holdMs}
-        min={0}
-        max={4000}
-        step={10}
-        editable
-        suffix="ms"
-        onChange={(ms) => store().setMosaicStateTiming(object.id, at, { holdMs: ms })}
-        onCommit={commitWith('Change hold')}
-      />
-
-      <Slider
-        label="Transition"
-        value={state.transitionMs}
-        min={MOSAIC_MIN_TRANSITION_MS}
-        max={4000}
-        step={10}
-        editable
-        suffix="ms"
-        onChange={(ms) => store().setMosaicStateTiming(object.id, at, { transitionMs: ms })}
-        onCommit={commitWith('Change transition')}
-      />
-
-      <div className="field">
-        <label className="field__label" htmlFor={`mosaic-easing-${object.id}-${at}`}>
-          Easing
-        </label>
-        <select
-          id={`mosaic-easing-${object.id}-${at}`}
-          className="input"
-          value={state.easing}
-          onChange={(e) => {
-            store().setMosaicEasing(object.id, at, e.target.value as MosaicEasing)
-            store().commit('Change easing')
-          }}
-        >
-          {EASING_PRESETS.map((preset) => (
-            <option key={preset} value={preset}>
-              {EASING_LABELS[preset]}
-            </option>
-          ))}
-        </select>
-      </div>
-
+      <StateTimingFields object={object} at={at} />
     </Section>
   )
 }

@@ -4,16 +4,16 @@ import type { Canvas as FabricCanvas } from 'fabric'
 import { Tooltip } from '../components/controls'
 import { Icon } from '../components/Icon'
 import { useUiStore } from '../state/uiStore'
-import type { FrameObject } from '../types/document'
-import { FRAME_MAX_STATES } from '../types/frame'
+import type { Stated } from '../types/document'
 import { placeOnStage } from './canvasAnchor'
-import { duplicateFrameStateAt, showFrameState } from './frameStates'
 import { windowOffset } from './renderer'
+import { duplicateStateAt, kindOf, showState } from './stated'
 import './canvas.css'
 
 /**
- * The HTML that rides on a spread frame's row: a number over each window, and
- * a + in every gap and after the last window.
+ * The HTML that rides on a spread object's row: a number over each window, and
+ * a + in every gap and after the last window. One component for every kind
+ * with states, because a row of windows is the same row whatever is in them.
  *
  * The numbers: a row of identical windows is a row of things you cannot tell
  * apart, and which state is which is the one thing the spread exists to show.
@@ -26,8 +26,8 @@ import './canvas.css'
  * the last window grows the row at its end.
  *
  * HTML, placed by the same maths as the bar, so everything keeps one size at
- * every zoom; each hangs off a point of its window through the frame's
- * transform, so a moved or turned frame carries them with it.
+ * every zoom; each hangs off a point of its window through the object's
+ * transform, so a moved or turned object carries them with it.
  */
 
 interface Point {
@@ -40,9 +40,9 @@ export function SpreadChips({
   object,
 }: {
   canvas: FabricCanvas | null
-  object: FrameObject | undefined
+  object: Stated | undefined
 }) {
-  const spread = useUiStore((s) => (object ? s.spreadFrame === object.id : false))
+  const spread = useUiStore((s) => (object ? s.spread === object.id : false))
   const shown = useUiStore((s) => (object ? (s.mosaicStates[object.id] ?? 0) : 0))
   const [chips, setChips] = useState<(Point | null)[]>([])
   const [inserts, setInserts] = useState<(Point | null)[]>([])
@@ -58,7 +58,7 @@ export function SpreadChips({
     const place = (): void => {
       const box = object.localBounds
       const scale = object.transform.scaleX || 1
-      // One window's step and the gap between two, in the frame's own units.
+      // One window's step and the gap between two, in the object's own units.
       const step = windowOffset(object, 1) / scale
       const gap = step - box.width
       const nextChips = object.states.map((_, i) =>
@@ -96,7 +96,8 @@ export function SpreadChips({
 
   if (!object || !spread) return null
   const index = Math.min(shown, object.states.length - 1)
-  const full = object.states.length >= FRAME_MAX_STATES
+  const kind = kindOf(object)
+  const full = object.states.length >= kind.max
 
   return (
     <>
@@ -110,7 +111,7 @@ export function SpreadChips({
             style={{ left: at.x, top: at.y }}
             aria-label={`Show state ${i + 1}`}
             aria-pressed={i === index}
-            onClick={() => showFrameState(object, i)}
+            onClick={() => showState(object, i)}
           >
             {i + 1}
           </button>
@@ -124,7 +125,7 @@ export function SpreadChips({
             style={{ left: at.x, top: at.y, width: gapSize.x, height: gapSize.y }}
           >
             <Tooltip
-              label={full ? `A frame holds at most ${FRAME_MAX_STATES} states` : 'Add a state here'}
+              label={full ? `A ${kind.noun} holds at most ${kind.max} states` : 'Add a state here'}
               side="top"
             >
               <button
@@ -132,7 +133,7 @@ export function SpreadChips({
                 className="pill__button spread-insert__button"
                 aria-label={`Add a state after state ${i + 1}`}
                 disabled={full}
-                onClick={() => duplicateFrameStateAt(object, i)}
+                onClick={() => duplicateStateAt(object, i)}
               >
                 <Icon name="plus" size={13} />
               </button>

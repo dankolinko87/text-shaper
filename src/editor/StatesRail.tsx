@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState, type TransitionEvent } from 'react'
 
-import { FrameStateList } from './FramePanel'
-import type { Stated } from './objectBarActions'
+import type { Stated } from '../types/document'
 import { useSelectedObject } from './selection'
-import { StateList } from './StateList'
+import { StatesList } from './StatesList'
 import './panels.css'
 
 /**
@@ -67,11 +66,7 @@ export function StatesRail() {
             <span className="panel__count">{shown.states.length}</span>
           </header>
           <div className="panel__scroll">
-            {shown.kind === 'mosaic' ? (
-              <StateList object={shown} />
-            ) : (
-              <FrameStateList object={shown} />
-            )}
+            <StatesList object={shown} />
           </div>
         </aside>
       ) : null}

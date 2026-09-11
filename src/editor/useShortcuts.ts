@@ -291,6 +291,16 @@ export function useShortcuts(): void {
            * always to move the object you were just editing.
            */
           if (ui.isDrawing) ui.setDrawing(false)
+          /*
+           * The caret is one layer in from everything below: its own handler
+           * takes Escape out of text entry (or out of a drag in flight), and
+           * nothing further out moves for the same keypress. Without this
+           * rung, leaving a mosaic also folded its row and dropped the
+           * selection — three layers for one Escape.
+           */
+          else if (ui.typing) {
+            // Handled by the mosaic's caret; the ladder stops here.
+          }
           else if (ui.editingPoints) ui.setEditingPoints(null)
           /*
            * A member picked inside a frame is one layer in from the frame
@@ -311,6 +321,8 @@ export function useShortcuts(): void {
             ui.setInsideFrame(null)
             doc.setSelection([frame])
           }
+          // A row laid out is one layer in from plain selection: fold it first.
+          else if (ui.spread) ui.setSpread(null)
           else doc.clearSelection()
           break
 

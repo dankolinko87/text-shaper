@@ -17,7 +17,7 @@ import {
 import type { AnimationPreset, TypographyObject } from "../types/document";
 import { hasContainer, isMoving } from "../typography/objectFit";
 import { wordsCanTravel } from "../typography/runFit";
-import { ControlList, PresetGrid } from "./presetControls";
+import { ControlList, PresetSelect } from "./presetControls";
 import "./panels.css";
 
 /**
@@ -118,7 +118,8 @@ export function AnimatePanel({
           nothing at all. Offered only where it works, rather than sitting in the
           picker doing nothing.
         */}
-        <PresetGrid
+        <PresetSelect
+          label="Motion"
           options={ANIMATIONS.filter(
             (p) => p.id !== "travel" || carriesATravellingLine(object),
           ).map((p) => ({ id: p.id, label: p.label }))}
@@ -211,7 +212,8 @@ export function AnimatePanel({
       {object.appearance.lineFill !== null && (
         <section className="panel__section">
           <h3 className="panel__section-title">Banner</h3>
-          <PresetGrid
+          <PresetSelect
+            label="Motion"
             options={[
               { id: "follow", label: "Follow type" },
               ...bannerAnimations().map((p) => ({ id: p.id, label: p.label })),
@@ -261,7 +263,8 @@ export function AnimatePanel({
       {hasContainer(object) && (
         <section className="panel__section">
           <h3 className="panel__section-title">Shape</h3>
-          <PresetGrid
+          <PresetSelect
+            label="Motion"
             options={SHAPE_ANIMATIONS.map((p) => ({
               id: p.id,
               label: p.label,

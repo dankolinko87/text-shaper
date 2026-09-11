@@ -22,11 +22,23 @@ import { seededValue } from '../utils/rng'
  * between rows.
  */
 
+/**
+ * What every control shares.
+ *
+ * `when` shows a control only while it holds — for a value that is real and
+ * kept but has nothing to act on until another control is set: a travel with
+ * no motion. Absent, not disabled, as the border's rows are absent until there
+ * is a border.
+ */
+export interface ControlBase {
+  key: string
+  label: string
+  when?: (config: Readonly<Record<string, unknown>>) => boolean
+}
+
 export type AnimationControl =
-  | {
+  | (ControlBase & {
       kind: 'number'
-      key: string
-      label: string
       min: number
       max: number
       step: number
@@ -34,21 +46,17 @@ export type AnimationControl =
       value: number
       /** How the number is shown. Defaults to a percentage. */
       format?: (value: number) => string
-    }
-  | {
+    })
+  | (ControlBase & {
       kind: 'colour'
-      key: string
-      label: string
       /** A hex colour. */
       value: string
-    }
-  | {
+    })
+  | (ControlBase & {
       kind: 'choice'
-      key: string
-      label: string
       options: readonly { value: string; label: string }[]
       value: string
-    }
+    })
 
 /** A preset's settings: numbers for sliders, hex strings for swatches. */
 export type AnimationConfig = Readonly<Record<string, number | string>>

@@ -5,20 +5,27 @@ import { Tooltip } from '../components/controls'
 import { Icon } from '../components/Icon'
 import { useUiStore } from '../state/uiStore'
 import type { LetterMosaicObject } from '../types/document'
-import { FRAME_MAX_STATES } from '../types/frame'
-import { MOSAIC_MAX_STATES, MOSAIC_MIN_STATES } from '../types/mosaic'
+import { isStated } from '../types/document'
 import { useCanvasAnchor } from './canvasAnchor'
-import { showFrameState } from './frameStates'
-import { changeMosaicStateCount, showMosaicState } from './mosaicStates'
-import { addState, moves, plateBounds, playing, togglePlay, toggleSpread } from './objectBarActions'
+import {
+  addState,
+  changeStateCount,
+  kindOf,
+  moves,
+  plateBounds,
+  playing,
+  showState,
+  togglePlay,
+  toggleSpread,
+} from './stated'
 import { useSelectedObject } from './selection'
 import './canvas.css'
 
 /**
  * The bar under the selected object: play, its states, and how they are shown.
  *
- * One bar, whatever the object. A shape with a preset gets play alone; a mosaic
- * or a frame gets play, the stepper, and +; a frame gets the spread toggle too.
+ * One bar, whatever the object. A shape with a preset gets play alone; anything
+ * with states gets play, the stepper, +, and the spread toggle.
  * It used to be three bars — states centred, play at the left, and a
  * measurement to keep the two from touching — which was three answers to
  * "where is the control for this object".
@@ -43,23 +50,24 @@ export function ObjectBar({
   const object = inside ?? selected
   const id = object?.id
   const shown = useUiStore((s) => (id ? (s.mosaicStates[id] ?? 0) : 0))
-  const spread = useUiStore((s) => (id ? s.spreadFrame === id : false))
+  const spread = useUiStore((s) => (id ? s.spread === id : false))
   const running = useUiStore((s) => (object ? playing(object, s) : false))
   const zoom = useUiStore((s) => s.zoom)
-  // A frame's bar hangs from its PLATE — the whole row while spread — so it
-  // clears the grey rather than sitting on its bottom strip.
+  // A stated object's bar hangs from its PLATE — a frame's whole row while
+  // spread — so it clears the grey rather than sitting on its bottom strip.
   const bounds = useMemo(
-    () => (object?.kind === 'frame' ? plateBounds(object, spread, zoom) : undefined),
+    () => (object && isStated(object) ? plateBounds(object, spread, zoom) : undefined),
     [object, spread, zoom],
   )
   const at = useCanvasAnchor(canvas, object, bounds)
 
   if (!object || !at) return null
 
-  const stated = object.kind === 'mosaic' || object.kind === 'frame' ? object : undefined
+  const stated = isStated(object) ? object : undefined
+  const kind = stated ? kindOf(stated) : undefined
   const count = stated ? stated.states.length : 0
   const index = Math.min(shown, Math.max(0, count - 1))
-  const max = object.kind === 'frame' ? FRAME_MAX_STATES : MOSAIC_MAX_STATES
+  const max = kind?.max ?? 0
   const full = count >= max
   const can = moves(object)
   // No play button under a thing that cannot play: a disabled transport under
@@ -68,9 +76,7 @@ export function ObjectBar({
   const showPlay = can || running
   if (!stated && !showPlay) return null
   const show = (next: number): void => {
-    if (!stated) return
-    if (stated.kind === 'mosaic') showMosaicState(stated, next)
-    else showFrameState(stated, next)
+    if (stated) showState(stated, next)
   }
 
   return (
@@ -121,27 +127,27 @@ export function ObjectBar({
                   {index + 1}/{count}
                 </span>
                 {/*
-                  A mosaic's count is a menu, because a mosaic is BORN with
-                  states and changing how many is a normal thing to do; it sits
-                  under an invisible native select, which brings the keyboard,
-                  the platform's own list and its dismissal with it. A frame's
-                  states are made by duplicating an arrangement you built, so +
-                  is the honest verb and there is no count to set.
+                  A count is a menu where the kind offers one — a mosaic is
+                  BORN with states and changing how many is a normal thing to
+                  do; it sits under an invisible native select, which brings
+                  the keyboard, the platform's own list and its dismissal with
+                  it. A frame's states are made by duplicating an arrangement
+                  you built, so + is its honest verb and it offers no count.
                 */}
-                {stated.kind === 'mosaic' ? (
+                {kind?.setCount ? (
                   <select
                     className="object-bar__picker"
                     aria-label={`State ${index + 1} of ${count}. Change how many states`}
                     value={count}
-                    onChange={(e) => changeMosaicStateCount(stated, Number(e.target.value))}
+                    onChange={(e) => changeStateCount(stated, Number(e.target.value))}
                   >
-                    {(count < MOSAIC_MIN_STATES ? [count] : []).map((value) => (
+                    {(count < kind.min ? [count] : []).map((value) => (
                       <option key={value} value={value}>
                         {value} state{value === 1 ? '' : 's'}
                       </option>
                     ))}
-                    {Array.from({ length: MOSAIC_MAX_STATES - MOSAIC_MIN_STATES + 1 }, (_, i) => {
-                      const value = MOSAIC_MIN_STATES + i
+                    {Array.from({ length: kind.max - kind.min + 1 }, (_, i) => {
+                      const value = kind.min + i
                       return (
                         <option key={value} value={value}>
                           {value} states
@@ -183,21 +189,17 @@ export function ObjectBar({
             them all out are different questions, and the row of steppers should
             not read as though this were one more of them.
           */}
-          {stated.kind === 'frame' ? (
-            <>
-              <span className="pill__divider" aria-hidden="true" />
-              <Tooltip label={spread ? 'Back to one frame' : 'Spread the states side by side'} side="top">
-                <button
-                  type="button"
-                  className="pill__button"
-                  aria-label={spread ? 'Back to one frame' : 'Spread the states side by side'}
-                  onClick={() => toggleSpread(stated)}
-                >
-                  <Icon name={spread ? 'collapse' : 'spread'} size={16} />
-                </button>
-              </Tooltip>
-            </>
-          ) : null}
+          <span className="pill__divider" aria-hidden="true" />
+          <Tooltip label={spread ? 'Back to one' : 'Spread the states side by side'} side="top">
+            <button
+              type="button"
+              className="pill__button"
+              aria-label={spread ? 'Back to one' : 'Spread the states side by side'}
+              onClick={() => toggleSpread(stated)}
+            >
+              <Icon name={spread ? 'collapse' : 'spread'} size={16} />
+            </button>
+          </Tooltip>
         </>
       ) : null}
     </div>

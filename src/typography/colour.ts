@@ -1,6 +1,6 @@
-import type { ColourEffect, ColourSettings } from '../types/document'
+import type { ColourConfigValue, ColourEffect, ColourSettings, GradientStop } from '../types/document'
 import { clamp } from '../utils/math'
-import type { AnimationControl } from './animation'
+import type { AnimationControl, ControlBase } from './animation'
 
 /**
  * Colour, and what it does over the loop.
@@ -27,8 +27,8 @@ export type FillPaint =
   | {
       kind: 'gradient'
       shape: 'linear'
-      from: string
-      to: string
+      /** The colours along the blend, in order. Beyond the outermost, the outer colour holds. */
+      stops: readonly GradientStop[]
       /** Degrees, clockwise from pointing right. */
       angle: number
       /** How far the band is pushed along its own axis, as a share of the box. */
@@ -39,21 +39,35 @@ export type FillPaint =
   | {
       kind: 'gradient'
       shape: 'radial'
-      from: string
-      to: string
+      /** The colours along the blend, in order. Beyond the outermost, the outer colour holds. */
+      stops: readonly GradientStop[]
       /** Where the middle sits, as a fraction of the box. (0.5, 0.5) is centred. */
       centre: { x: number; y: number }
       /** How far the blend reaches, as a share of the box's half-diagonal. */
       radius: number
     }
 
+/** A gradient's colours: a list of stops, the one control the generic list cannot draw. */
+export interface StopsControl extends ControlBase {
+  kind: 'stops'
+  key: 'stops'
+  value: GradientStop[]
+  min: number
+  max: number
+}
+export type ColourControl = AnimationControl | StopsControl
+export const MIN_STOPS = 2
+export const MAX_STOPS = 8
+
+type ColourConfig = Readonly<Record<string, ColourConfigValue>>
+
 export interface ColourEffectDef {
   id: ColourEffect
   label: string
   hint: string
-  controls: AnimationControl[]
+  controls: ColourControl[]
   /** The fill at this moment, given the artwork's own resting colour. */
-  paint(config: Readonly<Record<string, number | string>>, phase: number, base: string): FillPaint
+  paint(config: ColourConfig, phase: number, base: string): FillPaint
 }
 
 const whole = (v: number): string => `${Math.round(v)}`
@@ -61,9 +75,16 @@ const percent = (v: number): string => `${Math.round(v * 100)}%`
 
 /** The second colour every effect crosses to. Warm, and visible on most things. */
 const SECOND_COLOUR = '#e0552f'
+/*
+ * A fresh gradient's first stop. The document's own default text fill — but
+ * every real use goes through `defaultColourConfig(id, base)`, which puts the
+ * part's actual colour there; this is only what a config seeded with no base
+ * in hand starts from.
+ */
+const FIRST_COLOUR = '#101014'
 
 function read(
-  config: Readonly<Record<string, number | string>>,
+  config: ColourConfig,
   key: string,
   fallback: number,
 ): number {
@@ -72,12 +93,65 @@ function read(
 }
 
 function readColour(
-  config: Readonly<Record<string, number | string>>,
+  config: ColourConfig,
   key: string,
   fallback: string,
 ): string {
   const value = config[key]
-  return typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value.trim()) ? value.trim() : fallback
+  // Eight digits as well as six: an effect colour carries its opacity.
+  return typeof value === 'string' && /^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(value.trim())
+    ? value.trim()
+    : fallback
+}
+
+/** Stops in order of `at`, as a copy; the stop objects themselves are kept. */
+export function sortStops(stops: readonly GradientStop[]): GradientStop[] {
+  return [...stops].sort((a, b) => a.at - b.at)
+}
+
+const isStop = (value: unknown): value is GradientStop =>
+  !!value &&
+  typeof value === 'object' &&
+  typeof (value as GradientStop).at === 'number' &&
+  Number.isFinite((value as GradientStop).at) &&
+  typeof (value as GradientStop).colour === 'string' &&
+  parseHex((value as GradientStop).colour) !== null
+
+/**
+ * A gradient's stops, sorted and clamped — or, for a config that predates
+ * stops, the picture it painted: the part's own colour to the one it blended
+ * to. So nothing is wrong between a document being loaded and migrated.
+ */
+export function gradientStops(config: ColourConfig, base: string): GradientStop[] {
+  const value = config['stops']
+  if (Array.isArray(value)) {
+    const stops = value.filter(isStop).map((stop) => ({ at: clamp(stop.at, 0, 1), colour: stop.colour }))
+    if (stops.length >= MIN_STOPS) return sortStops(stops)
+  }
+  return [
+    { at: 0, colour: base },
+    { at: 1, colour: readColour(config, 'to', SECOND_COLOUR) },
+  ]
+}
+
+/** The colour a gradient shows at `t`, blending between the stops either side. */
+export function stopColourAt(stops: readonly GradientStop[], t: number): string {
+  const sorted = sortStops(stops)
+  const first = sorted[0]
+  if (!first) return '#000000'
+  if (t <= first.at) return first.colour
+  for (let i = 1; i < sorted.length; i++) {
+    const a = sorted[i - 1] as GradientStop
+    const b = sorted[i] as GradientStop
+    if (t <= b.at) {
+      return b.at === a.at ? b.colour : mixColours(a.colour, b.colour, (t - a.at) / (b.at - a.at))
+    }
+  }
+  return (sorted[sorted.length - 1] as GradientStop).colour
+}
+
+function sameStops(a: readonly GradientStop[], b: readonly GradientStop[]): boolean {
+  return a.length === b.length && a.every((stop, i) => stop.at === b[i]?.at && stop.colour === b[i]?.colour)
 }
 
 const solid = (colour: string): FillPaint => ({ kind: 'solid', colour })
@@ -137,9 +211,19 @@ export const COLOUR_EFFECTS: readonly ColourEffectDef[] = [
      * the artwork you already had — it only decides where it goes from there.
      */
     label: 'Gradient',
-    hint: 'Two colours blended through the artwork, still or moving.',
+    hint: 'Colours blended through the artwork, still or moving.',
     controls: [
-      { kind: 'colour', key: 'to', label: 'Blends to', value: SECOND_COLOUR },
+      {
+        kind: 'stops',
+        key: 'stops',
+        label: 'Stops',
+        value: [
+          { at: 0, colour: FIRST_COLOUR },
+          { at: 1, colour: SECOND_COLOUR },
+        ],
+        min: MIN_STOPS,
+        max: MAX_STOPS,
+      },
       {
         kind: 'choice',
         key: 'shape',
@@ -163,11 +247,22 @@ export const COLOUR_EFFECTS: readonly ColourEffectDef[] = [
         ],
         value: 'still',
       },
-      { kind: 'number', key: 'travel', label: 'Travel', min: 0, max: 1, step: 0.01, value: 0.5, format: percent },
+      {
+        kind: 'number',
+        key: 'travel',
+        label: 'Travel',
+        min: 0,
+        max: 1,
+        step: 0.01,
+        value: 0.5,
+        format: percent,
+        // A travel with no motion does nothing, and a live slider that does
+        // nothing is a question with no answer.
+        when: (config) => (config['motion'] ?? 'still') !== 'still',
+      },
     ],
     paint: (config, phase, base) => {
-      const from = base
-      const to = readColour(config, 'to', SECOND_COLOUR)
+      const stops = gradientStops(config, base)
       const angle = read(config, 'angle', 0)
       const motion = readChoice(config, 'motion', 'still')
       const travel = clamp(read(config, 'travel', 0.5), 0, 1)
@@ -196,8 +291,7 @@ export const COLOUR_EFFECTS: readonly ColourEffectDef[] = [
         return {
           kind: 'gradient',
           shape: 'radial',
-          from,
-          to,
+          stops,
           centre: {
             x: steady(0.5 + Math.cos(radians) * along + driftX),
             y: steady(0.5 + Math.sin(radians) * along + driftY),
@@ -209,8 +303,7 @@ export const COLOUR_EFFECTS: readonly ColourEffectDef[] = [
       return {
         kind: 'gradient',
         shape: 'linear',
-        from,
-        to,
+        stops,
         // Hover leans the axis and drifts it at the same time, a quarter turn
         // apart, so the blend floats around rather than wiping across. A lean on
         // its own barely reads: a linear gradient looks much the same rotated a
@@ -266,7 +359,7 @@ function steady(value: number): number {
 }
 
 function readChoice(
-  config: Readonly<Record<string, number | string>>,
+  config: ColourConfig,
   key: string,
   fallback: string,
 ): string {
@@ -285,10 +378,25 @@ export function colourEffectById(id: ColourEffect): ColourEffectDef {
   return COLOUR_EFFECTS.find((effect) => effect.id === id) ?? (COLOUR_EFFECTS[0] as ColourEffectDef)
 }
 
-/** The values an effect starts with, ready to store on an object. */
-export function defaultColourConfig(id: ColourEffect): Record<string, number | string> {
-  const out: Record<string, number | string> = {}
-  for (const control of colourEffectById(id).controls) out[control.key] = control.value
+/**
+ * The values an effect starts with, ready to store on an object.
+ *
+ * Given the part's own colour, a gradient's first stop is that colour, so
+ * choosing the effect does not repaint the still artwork. The stop list is a
+ * fresh copy per object — never the descriptor's own array.
+ */
+export function defaultColourConfig(id: ColourEffect, base?: string): Record<string, ColourConfigValue> {
+  const out: Record<string, ColourConfigValue> = {}
+  for (const control of colourEffectById(id).controls) {
+    if (control.kind === 'stops') {
+      out[control.key] = control.value.map((stop, i) => ({
+        ...stop,
+        colour: i === 0 && base ? base : stop.colour,
+      }))
+    } else {
+      out[control.key] = control.value
+    }
+  }
   return out
 }
 
@@ -307,7 +415,7 @@ export function samePaint(a: FillPaint, b: FillPaint): boolean {
   if (a.kind !== b.kind) return false
   if (a.kind === 'solid' && b.kind === 'solid') return a.colour === b.colour
   if (a.kind === 'gradient' && b.kind === 'gradient') {
-    if (a.shape !== b.shape || a.from !== b.from || a.to !== b.to) return false
+    if (a.shape !== b.shape || !sameStops(a.stops, b.stops)) return false
     if (a.shape === 'radial' && b.shape === 'radial') {
       return a.centre.x === b.centre.x && a.centre.y === b.centre.y && a.radius === b.radius
     }

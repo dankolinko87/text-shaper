@@ -15,6 +15,8 @@ import { createEmptyDocument, documentDefaults } from '../../src/state/defaults'
 import { deserializeDocument, serializeDocument } from '../../src/state/persistence'
 import { useDocumentStore } from '../../src/state/documentStore'
 import { valuesFor } from '../../src/frame/frame'
+import { paintAt, samePaint, stopColourAt } from '../../src/typography/colour'
+import type { ColourSettings } from '../../src/types/document'
 import { outlineToPath, pathToOutline } from '../../src/geometry/outline'
 import { mosaicTiles } from '../../src/mosaic/tiles'
 
@@ -1584,3 +1586,151 @@ describe('v28 -> v29: a frame’s states say only what was authored in them', ()
     expect(after.states.every((state) => Object.keys(state.values).length === 0)).toBe(true)
   })
 })
+
+describe('v29 -> v30: a gradient is its own stops', () => {
+  const settingsOf = (object: Record<string, unknown>, key: 'textColour' | 'shapeColour'): ColourSettings =>
+    (object['animation'] as Record<string, ColourSettings>)[key] as ColourSettings
+
+  it('turns each gradient into the two stops that draw the same picture', () => {
+    const object = JSON.parse(
+      JSON.stringify(deserializeDocument(gradientDocument('#00ff00')).doc!.objects['a']),
+    ) as Record<string, unknown>
+    const text = settingsOf(object, 'textColour')
+    const shape = settingsOf(object, 'shapeColour')
+    expect(text.config['stops']).toEqual([
+      { at: 0, colour: '#123456' },
+      { at: 1, colour: '#00ff00' },
+    ])
+    expect(shape.config['stops']).toEqual([
+      { at: 0, colour: '#abcdef' },
+      { at: 1, colour: '#0000ff' },
+    ])
+    expect('to' in text.config).toBe(false)
+    expect(text.config['angle'], 'everything else rides through').toBe(30)
+    expect(text.config['motion']).toBe('sweep')
+
+    // The picture is the one the old two-colour config painted, at rest and in motion.
+    const old: ColourSettings = {
+      effect: 'gradient',
+      config: { to: '#00ff00', shape: 'linear', angle: 30, motion: 'sweep', travel: 0.4 },
+    }
+    for (const phase of [0, 0.3, 0.7]) {
+      const was = paintAt(old, phase, '#123456')
+      const now = paintAt(text, phase, '#123456')
+      expect(samePaint(was, now), `phase ${phase}`).toBe(true)
+      if (was.kind === 'gradient' && now.kind === 'gradient') {
+        for (const t of [0, 0.5, 1]) expect(stopColourAt(now.stops, t)).toBe(stopColourAt(was.stops, t))
+      }
+    }
+  })
+
+  it('reads the second colour as the painter did: eight digits were never painted', () => {
+    const object = JSON.parse(
+      JSON.stringify(deserializeDocument(gradientDocument('#00ff0080')).doc!.objects['a']),
+    ) as Record<string, unknown>
+    expect((settingsOf(object, 'textColour').config['stops'] as { colour: string }[])[1]?.colour).toBe('#e0552f')
+  })
+
+  it('leaves a cycle its second colour', () => {
+    const doc = deserializeDocument(
+      documentAt(29, {
+        // A v29 document says what it is; the v1 skeleton beneath does not.
+        kind: 'typography',
+        animation: {
+          preset: 'none',
+          config: {},
+          loopDuration: 2,
+          shapePreset: 'none',
+          shapeConfig: {},
+          shapeAffectsText: true,
+          bannerPreset: 'follow',
+          bannerConfig: {},
+          textColour: { effect: 'cycle', config: { to: '#00ff00' } },
+          shapeColour: { effect: 'none', config: {} },
+        },
+      }),
+    )
+    const object = doc.doc!.objects['a']
+    expect(object?.kind === 'typography' && object.animation.textColour.config['to']).toBe('#00ff00')
+  })
+
+  it('reaches a gradient on a member inside a frame, and is a no-op the second time', () => {
+    useDocumentStore.setState({
+      doc: { ...useDocumentStore.getState().doc, objects: {}, objectOrder: [] },
+      past: [],
+      future: [],
+      selection: [],
+    })
+    const store = useDocumentStore.getState()
+    const frame = store.createFrame({
+      box: { x: 0, y: 0, width: 400, height: 300 },
+      artboardCenter: { x: 300, y: 200 },
+    })
+    const shape = store.createObjectFromGeometry({
+      open: false,
+      pathData: 'M -60 -50 L 60 -50 L 60 50 L -60 50 Z',
+      localBounds: { x: -60, y: -50, width: 120, height: 100 },
+      artboardCenter: { x: 300, y: 200 },
+      name: 'Box',
+    })
+    useDocumentStore.getState().addToFrame(frame, [shape])
+
+    const raw = JSON.parse(serializeDocument(useDocumentStore.getState().doc)) as Record<string, unknown>
+    raw['schemaVersion'] = 29
+    const object = (raw['objects'] as Record<string, Record<string, unknown>>)[frame]!
+    const own = (object['members'] as { object: Record<string, unknown> }[])[0]!.object
+    const animation = own['animation'] as Record<string, unknown>
+    animation['textColour'] = { effect: 'gradient', config: { to: '#ff0000', shape: 'linear', angle: 0, motion: 'still', travel: 0.5 } }
+    const base = (own['appearance'] as { textFill: string }).textFill
+
+    const once = deserializeDocument(JSON.stringify(raw))
+    const loaded = once.doc!.objects[frame]
+    if (loaded?.kind !== 'frame') throw new Error('expected a frame')
+    const member = loaded.members[0]!.object
+    if (member.kind !== 'typography') throw new Error('expected type')
+    expect(member.animation.textColour.config['stops']).toEqual([
+      { at: 0, colour: base },
+      { at: 1, colour: '#ff0000' },
+    ])
+
+    const again = deserializeDocument(serializeDocument(once.doc!))
+    const twice = again.doc!.objects[frame]
+    if (twice?.kind !== 'frame') throw new Error('expected a frame')
+    const member2 = twice.members[0]!.object
+    expect(member2.kind === 'typography' && member2.animation.textColour.config['stops']).toEqual(
+      member.animation.textColour.config['stops'],
+    )
+  })
+})
+
+/** A v29 document whose shape carries a gradient on its type and its container. */
+function gradientDocument(textTo: string): string {
+  return documentAt(29, {
+    kind: 'typography',
+    appearance: {
+      textFill: '#123456',
+      containerFill: '#abcdef',
+      lineFill: null,
+      containerStroke: null,
+      opacity: 1,
+    },
+    animation: {
+      preset: 'none',
+      config: {},
+      loopDuration: 2,
+      shapePreset: 'none',
+      shapeConfig: {},
+      shapeAffectsText: true,
+      bannerPreset: 'follow',
+      bannerConfig: {},
+      textColour: {
+        effect: 'gradient',
+        config: { to: textTo, shape: 'linear', angle: 30, motion: 'sweep', travel: 0.4 },
+      },
+      shapeColour: {
+        effect: 'gradient',
+        config: { to: '#0000ff', shape: 'radial', angle: 45, motion: 'still', travel: 0.5 },
+      },
+    },
+  })
+}

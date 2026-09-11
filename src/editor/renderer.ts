@@ -24,7 +24,7 @@ import { gradientEnds, paintAt, radialEnds, withAlpha, type FillPaint } from '..
 import type { RibbonSlice } from '../typography/frame'
 import type { SequenceFrame } from '../typography/objectFit'
 import { decompose } from '../geometry/transform'
-import type { FontSettings } from '../types/document'
+import type { FontSettings, Stated } from '../types/document'
 import type { Mat2D } from '../types/geometry'
 import type {
   DocumentObject,
@@ -36,7 +36,7 @@ import type {
   Transform2D,
   TypographyObject,
 } from '../types/document'
-import { opacityOf } from '../types/document'
+import { isStated, opacityOf } from '../types/document'
 import { selectionColour } from './colours'
 import { memberAtState, valuesFor } from '../frame/frame'
 import { mosaicClip, strokeChild, strokeRect } from './strokePaint'
@@ -85,11 +85,11 @@ export function wordsRideTheirBanner(object: TypographyObject): boolean {
 export interface RenderedObject {
   group: Group
   /**
-   * Every window of a frame drawn as a row, `windows[0]` being `group`.
+   * Every window of a stated object drawn as a row, `windows[0]` being `group`.
    *
-   * Present only while the frame is spread. The registry is what knows how
-   * many pictures of a frame are on the canvas; nothing scans the canvas to
-   * find out, and only the first carries the frame's `shapeId`.
+   * Present only while the object is spread. The registry is what knows how
+   * many pictures of an object are on the canvas; nothing scans the canvas to
+   * find out, and only the first carries the object's `shapeId`.
    */
   windows?: Group[]
   /**
@@ -113,10 +113,7 @@ export interface RenderedObject {
  */
 export function fabricPaint(paint: FillPaint): string | Gradient<'linear'> | Gradient<'radial'> {
   if (paint.kind === 'solid') return paint.colour
-  const colorStops = [
-    { offset: 0, color: paint.from },
-    { offset: 1, color: paint.to },
-  ]
+  const colorStops = paint.stops.map((stop) => ({ offset: stop.at, color: stop.colour }))
   if (paint.shape === 'radial') {
     return new Gradient({
       type: 'radial',
@@ -160,7 +157,7 @@ export function restingPaints(object: TypographyObject): {
 function paintKey(paint: FillPaint | null): string {
   if (!paint) return 'none'
   if (paint.kind === 'solid') return paint.colour
-  const blend = `${paint.from}>${paint.to}`
+  const blend = paint.stops.map((stop) => `${round(stop.at)}:${stop.colour}`).join('>')
   return paint.shape === 'radial'
     ? `radial:${blend}@${round(paint.centre.x)},${round(paint.centre.y)}/${round(paint.radius)}`
     : `linear:${blend}@${round(paint.angle)}/${round(paint.offset)}/${round(paint.spread)}`
@@ -615,14 +612,15 @@ export interface SyncInput {
    */
   insideFrame?: string | null
   /**
-   * The frame laid out as a ROW, one window per state, if any.
+   * The object with states laid out as a ROW, one window per state, if any —
+   * a mosaic or a frame.
    *
    * A view, like `insideFrame`: the document never learns about it. While
-   * spread the frame's first window is pinned to state 1 whatever is on show,
-   * so picking a member in window 3 — which makes state 3 the shown one — does
-   * not re-order the row under the hand doing it.
+   * spread the first window is pinned to state 1 whatever is on show, so
+   * pressing in window 3 — which makes state 3 the shown one — does not
+   * re-order the row under the hand doing it.
    */
-  spreadFrame?: string | null
+  spread?: string | null
   rendered: Map<string, RenderedObject>
 }
 
@@ -1390,17 +1388,82 @@ function frameContentKey(object: FrameObject, at: number, input: SyncInput): str
  * difference between being in a frame and being beside one.
  */
 /**
- * The gap between windows of a spread frame, as a share of the frame's width.
+ * The gap between windows of a spread object, as a share of the object's width.
  *
- * Proportional, so it holds at any frame size: a fixed gap reads as a crack
- * between two large frames and as a long strip between two small ones.
+ * Proportional, so it holds at any size: a fixed gap reads as a crack between
+ * two large windows and as a long strip between two small ones.
  */
 const WINDOW_GAP = 0.12
 
-/** Where window `index` of a spread frame stands, in artboard units. */
-export function windowOffset(object: FrameObject, index: number): number {
+/** Where window `index` of a spread object stands, in artboard units. */
+export function windowOffset(object: Stated, index: number): number {
   const step = object.localBounds.width * (object.transform.scaleX || 1) * (1 + WINDOW_GAP)
   return index * step
+}
+
+/**
+ * One window of a stated object: the object drawn at state `at`.
+ *
+ * The one place the kinds are told apart for drawing. Each kind's builder
+ * draws its state completely — a mosaic cuts every glyph up front; a frame
+ * places its members and is settled to its state's type by `settleWindows`,
+ * because the fits arrive with the text paths rather than with the builder.
+ */
+function buildWindow(object: Stated, at: number, input: SyncInput): Group {
+  return object.kind === 'mosaic'
+    ? buildMosaicGroup(object, at)
+    : buildFrameGroup(object, at, input)
+}
+
+/** What a window of a stated object at state `at` is drawn from, as one string. */
+function statedContentKey(object: Stated, at: number, input: SyncInput): string {
+  return object.kind === 'mosaic'
+    ? mosaicContentKey(object, at)
+    : frameContentKey(object, at, input)
+}
+
+/**
+ * The window contract, in one place.
+ *
+ * The first window IS the object — it keeps `shapeId`, stays as selectable as
+ * the mode left it, and is what every lookup by id already finds. The rest
+ * are further pictures of it: they carry NO `shapeId`, because it would enrol
+ * them in every first-match lookup at once and which group each returned
+ * would be add-order luck; and they can never be picked up as a whole, because
+ * a drag of one would reach `collectTransforms` as a transform of the object
+ * it is only a picture of. The object is moved by its first window, and every
+ * window follows, because they are all stood from its transform — the first
+ * where the object already is, so nothing jumps when a spread opens.
+ *
+ * Every window is stamped with whose it is and which STATE it draws, so that
+ * anything holding it or a child of it can ask where a press or a write
+ * belongs, instead of asking the UI store what it happens to be looking at.
+ * Applied on every sync, built or reused, so the stamps are never stale and
+ * the reuse path — which sets `selectable` from `locked` alone — cannot hand
+ * a further window back its handles.
+ */
+function placeWindow(group: Group, object: Stated, index: number, stateIndex: number): void {
+  group.set('statedId', object.id)
+  group.set('stateIndex', Math.min(Math.max(0, stateIndex), object.states.length - 1))
+  if (index === 0) return
+  group.set('shapeId', undefined)
+  group.set({ selectable: false, left: group.left + windowOffset(object, index) })
+  group.setCoords()
+}
+
+/**
+ * Every window of a spread object settled to ITS state, for the kinds that
+ * need it: a frame's builder only has the shown state's text paths, so each
+ * window's type is poured through its own outline afterwards, by the one
+ * settle the stop button uses. A mosaic's window is complete when built.
+ */
+export function settleWindows(
+  entry: RenderedObject,
+  object: Stated,
+  fits: Record<string, (FitOutcome | null)[]>,
+): void {
+  if (!entry.windows || object.kind !== 'frame') return
+  entry.windows.forEach((window, i) => settleFrame(window, object, i, fits))
 }
 
 /**
@@ -1458,24 +1521,9 @@ class FrameGroup extends Group {
   }
 }
 
-function buildFrameGroup(
-  object: FrameObject,
-  at: number,
-  input: SyncInput,
-  /**
-   * Which window of a spread this is, and therefore how it is drawn.
-   *
-   * The first window IS the frame — it keeps `shapeId`, stays selectable, and is
-   * what every lookup by id already finds. The rest are further pictures of it
-   * and carry NO `shapeId`: it would enrol them in every first-match lookup at
-   * once, and which group each returned would be add-order luck.
-   */
-  window = 0,
-): Group {
+function buildFrameGroup(object: FrameObject, at: number, input: SyncInput): Group {
   /** Whether the frame is being worked INSIDE, which is what makes it interactive. */
   const inside = input.insideFrame === object.id
-  /** A further window: drawn and live, but never the frame itself. */
-  const extra = window > 0
   /** Each member and where it belongs, applied once the group exists. */
   const placements: { child: FabricObject; transform: Transform2D }[] = []
   // Past the end draws the LAST state — the answer every gesture gives a stale
@@ -1638,14 +1686,7 @@ function buildFrameGroup(
      * accident on every document change, because the reuse path sets this from
      * `locked` alone.
      */
-    /*
-     * A further window can never be picked up as a whole: it is not the frame,
-     * and a drag of it would reach `collectTransforms` as a transform of the
-     * frame it is only a picture of. The frame is moved and resized by its
-     * first window, and every window follows, because they are all drawn from
-     * its transform.
-     */
-    selectable: !object.locked && !extra,
+    selectable: !object.locked,
     evented: !object.locked,
     objectCaching: false,
     borderColor: selectionColour(),
@@ -1655,15 +1696,7 @@ function buildFrameGroup(
     transparentCorners: false,
   })
 
-  // No `shapeId` on a further window — see the note on `window` above.
-  if (!extra) group.set('shapeId', object.id)
-  /*
-   * Which frame, and which STATE this group draws — stamped so that anything
-   * holding a child can ask its parent where a write belongs, instead of
-   * asking the UI store what it happens to be looking at.
-   */
-  group.set('frameId', object.id)
-  group.set('stateIndex', shown)
+  group.set('shapeId', object.id)
   // Reaches its overflow exactly when it draws it: the same condition the clip
   // rectangle below is sized by, so the two can never disagree.
   group.reachesOverflow = !object.clip
@@ -1673,9 +1706,6 @@ function buildFrameGroup(
     y: object.localBounds.y + object.localBounds.height / 2,
   })
   positionGroup(group, object)
-  // Stood along the row. The first window is where the frame already is, so
-  // nothing jumps when a spread opens.
-  if (extra) group.set({ left: group.left + windowOffset(object, window) })
 
   /*
    * Placed AFTER the group exists, because that is the only point at which a
@@ -1748,7 +1778,7 @@ export function syncCanvas(input: SyncInput): Map<string, RenderedObject> {
 
   // Remove objects that no longer exist.
   for (const [id, entry] of rendered) {
-    if (!doc.objects[id]) canvas.remove(entry.group)
+    if (!doc.objects[id]) removeRendered(canvas, entry)
   }
 
   for (const id of doc.objectOrder) {
@@ -1772,51 +1802,43 @@ export function syncCanvas(input: SyncInput): Map<string, RenderedObject> {
      */
     /*
      * Spread, the first window is pinned to state 1 whatever is on show.
-     * Picking a member in window 3 makes state 3 the shown one — that is what
-     * lands the edit — and the row must not re-order itself under the hand
-     * doing it.
+     * Pressing in window 3 makes state 3 the shown one — that is what lands
+     * the edit — and the row must not re-order itself under the hand doing it.
      */
-    const spread = object.kind === 'frame' && input.spreadFrame === object.id
+    const spread = isStated(object) && input.spread === object.id
     const shownState = input.mosaicStates?.[object.id] ?? 0
     const stateForGroup = spread ? 0 : shownState
 
-    const contentKey =
-      object.kind === 'mosaic'
-        ? mosaicContentKey(object, shownState)
-        : object.kind === 'frame'
-          ? /*
-             * Spread, the key describes EVERY window, because every window is
-             * drawn. Keyed on the first state alone, a colour or an arrangement
-             * changed in state 3 changed nothing the key could see, and window
-             * 3 went on showing what it showed before.
-             */
-            spread
-            ? `spread:${object.states.map((_, i) => frameContentKey(object, i, input)).join('|')}`
-            : frameContentKey(object, stateForGroup, input)
-          : typographyContentKey(object, textPaths[id] ?? '', bandPaths[id] ?? '')
+    /*
+     * Spread, the key describes EVERY window, because every window is drawn.
+     * Keyed on the first state alone, a colour or an arrangement changed in
+     * state 3 changed nothing the key could see, and window 3 went on showing
+     * what it showed before.
+     */
+    const contentKey = isStated(object)
+      ? spread
+        ? `spread:${object.states.map((_, i) => statedContentKey(object, i, input)).join('|')}`
+        : statedContentKey(object, stateForGroup, input)
+      : typographyContentKey(object, textPaths[id] ?? '', bandPaths[id] ?? '')
 
     let group: Group
     let windows: Group[] | undefined
     if (!existing || existing.contentKey !== contentKey) {
       if (existing) removeRendered(canvas, existing)
-      group =
-        object.kind === 'mosaic'
-          ? buildMosaicGroup(object, shownState)
-          : object.kind === 'frame'
-            ? buildFrameGroup(object, stateForGroup, input)
-            : buildGroup(object, textPaths[id] ?? '', bandPaths[id] ?? '', ribbons[id] ?? [])
+      group = isStated(object)
+        ? buildWindow(object, stateForGroup, input)
+        : buildGroup(object, textPaths[id] ?? '', bandPaths[id] ?? '', ribbons[id] ?? [])
       canvas.add(group)
 
       /*
        * The rest of the row, one window per remaining state — the same builder
-       * called again, so a window cannot drift from the frame it is a window
-       * onto. Each is settled to its own state's type by the caller, which has
-       * the fits; the builder only has the shown state's text paths.
+       * called again, so a window cannot drift from the object it is a window
+       * onto.
        */
-      if (spread && object.kind === 'frame') {
+      if (spread && isStated(object)) {
         windows = [group]
         for (let i = 1; i < object.states.length; i++) {
-          const window = buildFrameGroup(object, i, input, i)
+          const window = buildWindow(object, i, input)
           canvas.add(window)
           windows.push(window)
         }
@@ -1825,14 +1847,14 @@ export function syncCanvas(input: SyncInput): Map<string, RenderedObject> {
       group = existing.group
       windows = existing.windows
       applyTransform(group, object)
-      if (object.kind === 'frame' && windows) {
-        for (const [i, window] of windows.entries()) {
-          if (i === 0) continue
-          applyTransform(window, object)
-          window.set({ left: window.left + windowOffset(object, i) })
-          window.setCoords()
-        }
-      }
+      for (const window of windows ?? []) if (window !== group) applyTransform(window, object)
+    }
+
+    // Stood along the row and stamped, built or reused — see `placeWindow`.
+    if (isStated(object)) {
+      ;(windows ?? [group]).forEach((window, i) =>
+        placeWindow(window, object, i, spread ? i : shownState),
+      )
     }
 
     next.set(id, windows ? { group, contentKey, windows } : { group, contentKey })

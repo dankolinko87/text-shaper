@@ -12,22 +12,27 @@ import {
   paintAt,
   parseHex,
   samePaint,
+  stopColourAt,
   withAlpha,
   type FillPaint,
 } from '../../src/typography/colour'
-import type { ColourEffect } from '../../src/types/document'
+import type { ColourConfigValue, ColourEffect } from '../../src/types/document'
 
 const NEAR_BLACK = '#101014'
 const WARM = '#e0552f'
 
-const settings = (effect: ColourEffect, config: Record<string, number | string> = {}) => ({
+const settings = (
+  effect: ColourEffect,
+  config: Record<string, ColourConfigValue> = {},
+  base: string = NEAR_BLACK,
+) => ({
   effect,
-  config: { ...defaultColourConfig(effect), ...config },
+  config: { ...defaultColourConfig(effect, base), ...config },
 })
 
-/** The colours a paint actually puts on the artwork. */
+/** The colours a paint actually puts on the artwork, first to last. */
 function coloursOf(paint: FillPaint): string[] {
-  return paint.kind === 'solid' ? [paint.colour] : [paint.from, paint.to]
+  return paint.kind === 'solid' ? [paint.colour] : paint.stops.map((stop) => stop.colour)
 }
 
 describe('every colour effect', () => {
@@ -78,8 +83,18 @@ describe('every colour effect', () => {
     for (const effect of COLOUR_EFFECTS) {
       const config = defaultColourConfig(effect.id)
       for (const control of effect.controls) {
-        expect(config[control.key], `${effect.label}/${control.key}`).toBe(control.value)
-        if (control.kind === 'colour') {
+        expect(config[control.key], `${effect.label}/${control.key}`).toEqual(control.value)
+        if (control.kind === 'stops') {
+          expect(control.value.length).toBeGreaterThanOrEqual(control.min)
+          expect(control.value.length).toBeLessThanOrEqual(control.max)
+          expect(control.value[0]?.at).toBe(0)
+          expect(control.value[control.value.length - 1]?.at).toBe(1)
+          for (const stop of control.value) {
+            expect(stop.colour).toMatch(/^#[0-9a-f]{6}$/i)
+            expect(stop.at).toBeGreaterThanOrEqual(0)
+            expect(stop.at).toBeLessThanOrEqual(1)
+          }
+        } else if (control.kind === 'colour') {
           expect(control.value, `${effect.label}/${control.key}`).toMatch(/^#[0-9a-f]{6}$/i)
         } else if (control.kind === 'choice') {
           // A choice has to start on one of the things it offers.
@@ -95,13 +110,13 @@ describe('every colour effect', () => {
   it('emits usable colours at either end of every control', () => {
     for (const effect of MOVING) {
       for (const extreme of ['min', 'max'] as const) {
-        const config: Record<string, number | string> = {}
+        const config: Record<string, ColourConfigValue> = {}
         for (const control of effect.controls) {
           config[control.key] = control.kind === 'number' ? control[extreme] : control.value
         }
         for (const phase of [0, 0.33, 0.66]) {
           for (const colour of coloursOf(paintAt({ effect: effect.id, config }, phase, NEAR_BLACK))) {
-            expect(colour, `${effect.label} at ${extreme}`).toMatch(/^#[0-9a-f]{6}$/i)
+            expect(colour, `${effect.label} at ${extreme}`).toMatch(/^#[0-9a-f]{6}([0-9a-f]{2})?$/i)
           }
         }
       }
@@ -144,14 +159,87 @@ function blendAt(paint: FillPaint, x: number, y: number): number {
 }
 
 describe('the gradient', () => {
-  it('describes two colours rather than resolving one', () => {
+  it('describes its stops rather than resolving one colour', () => {
     // The editor and the GIF encoder each build their own kind of paint from
     // this. Resolving it here would leave them free to disagree.
     const paint = paintAt(settings('gradient'), 0.25, NEAR_BLACK)
     expect(paint.kind).toBe('gradient')
     if (paint.kind !== 'gradient') return
-    expect(paint.from).toBe(NEAR_BLACK)
-    expect(paint.to).toBe(WARM)
+    expect(paint.stops).toEqual([
+      { at: 0, colour: NEAR_BLACK },
+      { at: 1, colour: WARM },
+    ])
+  })
+
+  it('starts a fresh gradient on the artwork’s own colour, whatever the base', () => {
+    const config = defaultColourConfig('gradient', '#336699')
+    expect((config['stops'] as { colour: string }[])[0]?.colour).toBe('#336699')
+    // A copy per object: the descriptor's own list is never handed out.
+    expect(config['stops']).not.toBe(defaultColourConfig('gradient', '#336699')['stops'])
+  })
+
+  it('blends through every stop in order, along the axis', () => {
+    const stops = [
+      { at: 0, colour: '#000000' },
+      { at: 0.5, colour: '#ff0000' },
+      { at: 1, colour: '#ffffff' },
+    ]
+    const paint = paintAt(settings('gradient', { stops, angle: 0 }), 0, NEAR_BLACK)
+    if (paint.kind !== 'gradient') throw new Error('expected a gradient')
+    const at = (x: number) => stopColourAt(paint.stops, blendAt(paint, x, 0.5))
+    expect(at(0)).toBe('#000000')
+    expect(at(0.25)).toBe('#800000')
+    expect(at(0.75)).toBe('#ff8080')
+    expect(at(1)).toBe('#ffffff')
+  })
+
+  it('paints unsorted stops in order, and clamps a stray position', () => {
+    const paint = paintAt(
+      settings('gradient', {
+        stops: [
+          { at: 1.4, colour: '#ffffff' },
+          { at: 0, colour: '#000000' },
+        ],
+      }),
+      0,
+      NEAR_BLACK,
+    )
+    if (paint.kind !== 'gradient') throw new Error('expected a gradient')
+    expect(paint.stops.map((stop) => stop.at)).toEqual([0, 1])
+    expect(paint.stops[0]?.colour).toBe('#000000')
+  })
+
+  it('still paints a config that predates stops as the picture it had', () => {
+    // Between a document loading and its migration, nothing may look wrong.
+    const paint = paintAt({ effect: 'gradient', config: { to: '#00ff00' } }, 0, NEAR_BLACK)
+    if (paint.kind !== 'gradient') throw new Error('expected a gradient')
+    expect(paint.stops).toEqual([
+      { at: 0, colour: NEAR_BLACK },
+      { at: 1, colour: '#00ff00' },
+    ])
+  })
+
+  it('keeps the opacity of a stop, and of a cycle’s second colour', () => {
+    const faded = paintAt(
+      settings('gradient', {
+        stops: [
+          { at: 0, colour: '#000000' },
+          { at: 1, colour: '#e0552f80' },
+        ],
+      }),
+      0,
+      NEAR_BLACK,
+    )
+    expect(coloursOf(faded)[1]).toBe('#e0552f80')
+    const cycled = paintAt(settings('cycle', { to: '#e0552f80' }), 0.5, NEAR_BLACK)
+    expect(coloursOf(cycled)[0]).toBe('#e0552f80')
+  })
+
+  it('offers travel only once there is a motion to travel with', () => {
+    const travel = colourEffectById('gradient').controls.find((control) => control.key === 'travel')
+    expect(travel?.when?.({})).toBe(false)
+    expect(travel?.when?.({ motion: 'still' })).toBe(false)
+    expect(travel?.when?.({ motion: 'sweep' })).toBe(true)
   })
 
   it('is still unless a motion is asked for', () => {

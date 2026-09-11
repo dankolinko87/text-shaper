@@ -9,7 +9,7 @@ import {
   spreadBounds,
   togglePlay,
   toggleSpread,
-} from '../../src/editor/objectBarActions'
+} from '../../src/editor/stated'
 import { useDocumentStore } from '../../src/state/documentStore'
 import { useUiStore } from '../../src/state/uiStore'
 import type { FrameObject } from '../../src/types/document'
@@ -42,7 +42,7 @@ beforeEach(() => {
   useUiStore.setState({
     insideFrame: null,
     frameSelection: [],
-    spreadFrame: null,
+    spread: null,
     mosaicStates: {},
     mosaicPlayback: null,
     previewObject: null,
@@ -87,11 +87,11 @@ describe('play', () => {
   })
 
   it('folds a spread frame back to one window and plays it, in one press', () => {
-    ui().setSpreadFrame(frame)
-    expect(ui().spreadFrame).toBe(frame)
+    ui().setSpread(frame)
+    expect(ui().spread).toBe(frame)
 
     togglePlay(frameIn())
-    expect(ui().spreadFrame, 'the row is gone').toBeNull()
+    expect(ui().spread, 'the row is gone').toBeNull()
     expect(ui().mosaicPlayback).toMatchObject({ object: frame, playing: true })
   })
 
@@ -114,7 +114,7 @@ describe('adding a state', () => {
   })
 
   it('copies the LAST one while spread, so the row grows at its end', () => {
-    ui().setSpreadFrame(frame)
+    ui().setSpread(frame)
     ui().setMosaicState(frame, 0)
     expect(addState(frameIn(), 0)).toBe(true)
     expect(frameIn().states).toHaveLength(3)
@@ -123,13 +123,14 @@ describe('adding a state', () => {
 })
 
 describe('the spread', () => {
-  it('opens with nothing playing, and closes', () => {
+  it('opens with nothing playing, inside the frame, and closes', () => {
     togglePlay(frameIn())
     toggleSpread(frameIn())
-    expect(ui().spreadFrame).toBe(frame)
+    expect(ui().spread).toBe(frame)
+    expect(ui().insideFrame, 'a frame is entered: its windows are for picking members').toBe(frame)
     expect(ui().mosaicPlayback, 'nothing plays into a spread').toBeNull()
     toggleSpread(frameIn())
-    expect(ui().spreadFrame).toBeNull()
+    expect(ui().spread).toBeNull()
   })
 
   it('hangs its bar from the whole row, whatever the frame’s scale', () => {
@@ -156,6 +157,16 @@ describe('the plate behind a held frame', () => {
     expect(plate.width - box.width, 'the same on both sides').toBeCloseTo(side * 2, 6)
     expect(box.y - plate.y, 'and on top').toBeCloseTo(side, 6)
     expect(plate.height - box.height, 'and below').toBeCloseTo(side * 2, 6)
+  })
+
+  it('pads a mosaic the same way, from its own box', () => {
+    const box = { x: -60, y: -60, width: 120, height: 120 }
+    const mosaic = { kind: 'mosaic', localBounds: box, transform: { scaleX: 1, scaleY: 1 } } as never
+    const plate = plateBounds(mosaic, false, 1)
+    const side = box.x - plate.x
+    expect(side).toBeGreaterThan(0)
+    expect(box.y - plate.y).toBeCloseTo(side, 6)
+    expect(plate.width - box.width).toBeCloseTo(side * 2, 6)
   })
 
   it('makes screen-sized room for the number chips above a spread row', () => {

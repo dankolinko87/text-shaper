@@ -1,12 +1,15 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 
 import {
-  deleteFrameStateAt,
-  duplicateFrameStateAt,
-  moveFrameStateTo,
-  showFrameState,
-} from '../../src/editor/frameStates'
-import { doublePressOutside, pressOutside, spreadHoldsGround } from '../../src/editor/frameStates'
+  deleteStateAt,
+  doublePressOutside,
+  duplicateStateAt,
+  moveStateTo,
+  pressOutside,
+  showState,
+  spreadHoldsGround,
+  toggleSpread,
+} from '../../src/editor/stated'
 import { valuesFor } from '../../src/frame/frame'
 import { useDocumentStore } from '../../src/state/documentStore'
 import { useUiStore } from '../../src/state/uiStore'
@@ -68,14 +71,14 @@ beforeEach(() => {
 describe('showing a state', () => {
   it('stops a preview, because a chosen state is not an interpolated one', () => {
     ui().playMosaic(frame)
-    showFrameState(frameIn(), 2)
+    showState(frameIn(), 2)
     expect(ui().mosaicPlayback).toBeNull()
     expect(ui().mosaicStates[frame]).toBe(2)
   })
 
   it('refuses an index it cannot show', () => {
     ui().setMosaicState(frame, 1)
-    showFrameState(frameIn(), 99)
+    showState(frameIn(), 99)
     expect(ui().mosaicStates[frame]).toBe(1)
   })
 })
@@ -83,7 +86,7 @@ describe('showing a state', () => {
 describe('duplicating a state', () => {
   it('puts the copy straight after it and goes there', () => {
     const before = frameIn().states.length
-    expect(duplicateFrameStateAt(frameIn(), 0)).toBe(true)
+    expect(duplicateStateAt(frameIn(), 0)).toBe(true)
     expect(frameIn().states.length).toBe(before + 1)
     // Selected, because duplicating means "another like this, then I change it".
     expect(ui().mosaicStates[frame]).toBe(1)
@@ -91,7 +94,7 @@ describe('duplicating a state', () => {
 
   it('copies what the state authored, and only that', () => {
     author(0, 120)
-    duplicateFrameStateAt(frameIn(), 0)
+    duplicateStateAt(frameIn(), 0)
     const member = frameIn().members[0]!
     expect(Object.keys(frameIn().states[1]!.values[member.id] ?? {})).toEqual(['transform'])
     expect(valuesFor(member, frameIn().states[1]).transform.x).toBeCloseTo(120, 6)
@@ -101,8 +104,8 @@ describe('duplicating a state', () => {
   })
 
   it('refuses at the limit', () => {
-    while (frameIn().states.length < 12) duplicateFrameStateAt(frameIn(), 0)
-    expect(duplicateFrameStateAt(frameIn(), 0)).toBe(false)
+    while (frameIn().states.length < 12) duplicateStateAt(frameIn(), 0)
+    expect(duplicateStateAt(frameIn(), 0)).toBe(false)
     expect(frameIn().states.length).toBe(12)
   })
 })
@@ -110,7 +113,7 @@ describe('duplicating a state', () => {
 describe('deleting a state', () => {
   it('removes it and lands on the nearest survivor', () => {
     ui().setMosaicState(frame, 1)
-    expect(deleteFrameStateAt(frameIn(), 1)).toBe(true)
+    expect(deleteStateAt(frameIn(), 1)).toBe(true)
     expect(frameIn().states.length).toBe(2)
     expect(ui().mosaicStates[frame]).toBe(1)
   })
@@ -118,20 +121,20 @@ describe('deleting a state', () => {
   it('never leaves the picker pointing past the end', () => {
     const last = frameIn().states.length - 1
     ui().setMosaicState(frame, last)
-    deleteFrameStateAt(frameIn(), last)
+    deleteStateAt(frameIn(), last)
     expect(ui().mosaicStates[frame] ?? 0).toBeLessThan(frameIn().states.length)
   })
 
   it('refuses to take the timeline below two states', () => {
-    deleteFrameStateAt(frameIn(), 2)
-    expect(deleteFrameStateAt(frameIn(), 0)).toBe(false)
+    deleteStateAt(frameIn(), 2)
+    expect(deleteStateAt(frameIn(), 0)).toBe(false)
     expect(frameIn().states.length).toBe(2)
   })
 
   it('puts the state back on undo, which is what makes not asking safe', () => {
     author(1, 80)
     const before = frameIn().states.map((each) => each.id)
-    deleteFrameStateAt(frameIn(), 1)
+    deleteStateAt(frameIn(), 1)
     store().undo()
     expect(frameIn().states.map((each) => each.id)).toEqual(before)
   })
@@ -143,7 +146,7 @@ describe('moving a state', () => {
     author(1, 20)
     author(2, 30)
     const ids = frameIn().states.map((each) => each.id)
-    expect(moveFrameStateTo(frameIn(), 0, 2)).toBe(true)
+    expect(moveStateTo(frameIn(), 0, 2)).toBe(true)
     expect(frameIn().states.map((each) => each.id)).toEqual([ids[1], ids[2], ids[0]])
     expect(ui().mosaicStates[frame], 'looking at the state that moved').toBe(2)
     const member = frameIn().members[0]!
@@ -151,13 +154,13 @@ describe('moving a state', () => {
   })
 
   it('does nothing for a move to where it already is', () => {
-    expect(moveFrameStateTo(frameIn(), 1, 1)).toBe(false)
+    expect(moveStateTo(frameIn(), 1, 1)).toBe(false)
   })
 
   it('is one undo step', () => {
     const ids = frameIn().states.map((each) => each.id)
     const past = store().past.length
-    moveFrameStateTo(frameIn(), 0, 2)
+    moveStateTo(frameIn(), 0, 2)
     expect(store().past.length).toBe(past + 1)
     store().undo()
     expect(frameIn().states.map((each) => each.id)).toEqual(ids)
@@ -210,7 +213,7 @@ describe('a press on the ground outside the frame', () => {
       future: [],
       selection: [],
     })
-    useUiStore.setState({ insideFrame: null, frameSelection: [], spreadFrame: null })
+    useUiStore.setState({ insideFrame: null, frameSelection: [], spread: null })
     frame = useDocumentStore.getState().createFrame({
       box: { x: 0, y: 0, width: 400, height: 300 },
       artboardCenter: { x: 0, y: 0 },
@@ -231,19 +234,19 @@ describe('a press on the ground outside the frame', () => {
      * about. Folding it on the first click beside it threw the comparison
      * away — so one click keeps the row and the frame, and drops the pick.
      */
-    useUiStore.getState().setSpreadFrame(frame)
+    toggleSpread(useDocumentStore.getState().doc.objects[frame] as FrameObject)
     useUiStore.setState({ frameSelection: ['m1'] })
     pressOutside(frame)
-    expect(useUiStore.getState().spreadFrame, 'still spread').toBe(frame)
+    expect(useUiStore.getState().spread, 'still spread').toBe(frame)
     expect(useUiStore.getState().insideFrame, 'still inside').toBe(frame)
     expect(useUiStore.getState().frameSelection).toEqual([])
     expect(spreadHoldsGround(), 'and the canvas keeps the frame selected').toBe(true)
   })
 
   it('folds the row on a double-click, and stays inside the frame', () => {
-    useUiStore.getState().setSpreadFrame(frame)
+    toggleSpread(useDocumentStore.getState().doc.objects[frame] as FrameObject)
     expect(doublePressOutside(frame)).toBe(true)
-    expect(useUiStore.getState().spreadFrame).toBeNull()
+    expect(useUiStore.getState().spread).toBeNull()
     expect(useUiStore.getState().insideFrame, 'collapsed, not left').toBe(frame)
   })
 

@@ -144,7 +144,8 @@
   width: 14px;
   height: 32px;
   padding: 0;
-  margin-left: -3px;
+  /* Beside the tool, not over its corner: the two are two buttons. */
+  margin-left: 1px;
   border: 0;
   border-radius: var(--radius-sm);
   background: transparent;
@@ -354,7 +355,7 @@
   padding:0 var(--space-3);
   border-radius:var(--radius-full);
   background:var(--surface-3);
-  color:var(--text-tertiary);
+  color:var(--text-primary);
   font-family:var(--font-mono);
   font-size:var(--text-xs);
 }
@@ -581,10 +582,11 @@
     animation:none;
   }
 }
+/* Inset equally from the header line above and the content below. */
 .panel__tabs {
   border-bottom:1px solid var(--border-subtle);
   gap:var(--space-1);
-  padding:0 var(--space-5) 10px;
+  padding:var(--space-4) var(--space-5);
   display:flex;
 }
 .panel__tab {
@@ -604,55 +606,20 @@
 .panel__tab:hover {
   color:var(--text-primary);
 }
-.panel__tab:active {
-  background:var(--surface-3);
+.panel__tab:active:not([aria-selected='true']) {
+  background: color-mix(in srgb, var(--chip-active) 50%, transparent);
 }
 /*
- * The tab you are on.
- *
- * Rewritten rather than restored: this rule was added after the build the rest
- * of this block came back from, so it was the one piece the recovery could not
- * return. A filled pill in the raised surface, which is how every other
- * segmented control in the app says "here".
+ * The tab you are on: a filled chip. Keyed off the ARIA state the markup
+ * already writes, as the segmented control is off `aria-pressed` — state is
+ * an attribute, not a modifier class.
  */
-.panel__tab--active {
-  background: var(--surface-3);
+.panel__tab[aria-selected='true'] {
+  background: var(--chip-active);
   color: var(--text-primary);
 }
 .field--stack {
   display:block;
-}
-.preset-grid {
-  grid-template-columns:repeat(3,1fr);
-  gap:var(--space-2);
-  margin-top:var(--space-3);
-  display:grid;
-}
-.preset-chip {
-  border:1px solid var(--border-subtle);
-  color:var(--text-tertiary);
-  font:inherit;
-  cursor:pointer;
-  background:0 0;
-  border-radius:var(--radius-md);
-  padding:7px 0;
-  font-size:var(--text-sm);
-  transition:
-    background var(--duration-fast) var(--ease),
-    color var(--duration-fast) var(--ease),
-    border-color var(--duration-fast) var(--ease);
-}
-.preset-chip:hover {
-  color:var(--text-primary);
-  border-color:var(--border-strong);
-}
-.preset-chip:active {
-  background:var(--surface-3);
-}
-.preset-chip--active {
-  background:var(--accent-muted);
-  border-color:var(--accent-border);
-  color:var(--text-primary);
 }
 
 /* ------------------------------------------------------------------ sections
@@ -774,25 +741,40 @@
 .state-card:hover {
   background: var(--surface-2);
 }
-.state-card[data-open="true"] {
-  background: var(--surface-2);
-  border-color: var(--border-default);
-}
 /*
  * Which state is on the canvas, marked on the card rather than implied by its
  * being unfolded — the two came apart when the list stopped being an accordion,
  * and with every card shut there would otherwise be nothing saying which
  * composition you are looking at.
  */
+/*
+ * The film: while the object plays, the card of the state on screen takes a
+ * quiet grey wash and a grey bar fills along its bottom through the state's
+ * turn — then the next card's, like a strip running past a gate. Before the
+ * shown rule, so the state on show keeps its green when the two coincide.
+ */
+.state-card[data-playing="true"] {
+  background: var(--surface-2);
+}
+.state-card__film {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 2px;
+  border-radius: 1px;
+  /* Quieter than the text: a bar you notice moving, not one you read. */
+  background: var(--border-strong);
+  pointer-events: none;
+}
+/*
+ * The state on show: a filled chip, as the tab you are on is — the same
+ * chosen-state colour, and no blue, which here would read as a selection box.
+ */
 .state-card[data-shown="true"] {
-  border-color: var(--selection-border);
+  background: var(--selection-muted);
 }
 .state-card[data-shown="true"] .state-card__name {
   color: var(--text-primary);
-}
-.state-card[data-shown="true"] .thumb {
-  outline: 2px solid var(--selection);
-  outline-offset: -1px;
 }
 .state-card__row {
   /* A handle, so a drag across it must not select the labels it passes over. */
@@ -801,7 +783,10 @@
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-2) var(--space-3) var(--space-2) var(--space-2);
+  /* Even on both sides: there is no handle to make room for at the left. */
+  padding: var(--space-2) var(--space-3);
+  /* The whole row is the handle. */
+  cursor: grab;
 }
 .state-card__open {
   flex: 1;
@@ -842,7 +827,7 @@
   min-width: 0;
 }
 .state-card__name {
-  color: var(--text-primary);
+  color: var(--text-secondary);
   font-size: var(--text-md);
 }
 .state-card__timing {
@@ -872,17 +857,6 @@
 .state-card[data-shown="true"] .state-card__actions,
 .state-card__actions:focus-within {
   opacity: 1;
-}
-.state-card__body {
-  border-top: 1px solid var(--border-subtle);
-}
-.state-card__body .section__lid {
-  padding-left: var(--space-4);
-  padding-right: var(--space-4);
-}
-.state-card__body .section__body {
-  padding-left: var(--space-4);
-  padding-right: var(--space-4);
 }
 
 /* ------------------------------------------------------------- tile picker
@@ -1049,27 +1023,6 @@
   color: var(--text-secondary);
 }
 
-/* ------------------------------------------------- reordering the states
- *
- * The order IS the animation, so moving a card is an edit to what plays. The
- * feedback has to say where it will land, not merely that something is moving.
- */
-.state-card__grip {
-  display: flex;
-  align-items: center;
-  color: var(--text-disabled);
-  cursor: grab;
-  opacity: 0;
-  transition: opacity var(--duration-fast) var(--ease);
-  margin-left: calc(var(--space-1) * -1);
-}
-.state-card:hover .state-card__grip,
-.state-card[data-open="true"] .state-card__grip {
-  opacity: 1;
-}
-.state-card:active .state-card__grip {
-  cursor: grabbing;
-}
 /* The card being carried fades in place, so the line below is what you read. */
 .state-card[data-dragging="true"] {
   opacity: 0.4;
@@ -1108,4 +1061,99 @@
 .section__chip--ring {
   background: none;
   border-width: 2px;
+}
+
+/* ------------------------------------------------------- gradient field */
+
+/*
+ * A gradient's stops: the bar they make, with a handle per stop, and a row per
+ * stop under it. `--gradient` is the bar's picture, set by the editor.
+ */
+.gradient-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.gradient-field__header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+.gradient-field__header .field__label {
+  flex: 1;
+}
+.gradient-field__bar {
+  position: relative;
+  height: 16px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  /* The picture over checks, so a see-through stop reads as see-through. */
+  background-image:
+    var(--gradient),
+    linear-gradient(45deg, var(--border-strong) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--border-strong) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--border-strong) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--border-strong) 75%);
+  background-size:
+    auto,
+    8px 8px,
+    8px 8px,
+    8px 8px,
+    8px 8px;
+  background-position:
+    0 0,
+    0 0,
+    0 4px,
+    4px -4px,
+    -4px 0;
+  cursor: copy;
+}
+/* A handle: the stop's colour in a small pill, ringed when it is the one chosen. */
+.gradient-field__stop {
+  position: absolute;
+  top: 50%;
+  width: 12px;
+  height: 18px;
+  padding: 0;
+  border: 2px solid #fff;
+  border-radius: 4px;
+  background-image:
+    linear-gradient(var(--stop-colour), var(--stop-colour)),
+    linear-gradient(45deg, var(--border-strong) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--border-strong) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--border-strong) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--border-strong) 75%);
+  background-size:
+    auto,
+    6px 6px,
+    6px 6px,
+    6px 6px,
+    6px 6px;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4);
+  translate: -50% -50%;
+  cursor: ew-resize;
+  touch-action: none;
+}
+.gradient-field__stop[data-selected='true'] {
+  outline: 2px solid var(--selection);
+  outline-offset: 1px;
+}
+.gradient-field__rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.gradient-field__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 2px;
+  border-radius: var(--radius-sm);
+}
+.gradient-field__row[data-selected='true'] {
+  background: var(--well);
+}
+.gradient-field__row > .field {
+  flex: 1;
+  min-width: 0;
 }

@@ -1,16 +1,27 @@
+import type { ReactNode } from 'react'
+
 import { AddRow, ColorField, Slider, StrokeField } from '../components/controls'
 import { DEFAULT_STROKE } from '../geometry/stroke'
 import { typographyById, useDocumentStore } from '../state/documentStore'
 import { valuesFor } from '../frame/frame'
 import { frameTargetFor } from './memberEdits'
-import { COLOUR_EFFECTS, colourEffectById, defaultColourConfig } from '../typography/colour'
+import type { AnimationControl } from '../typography/animation'
+import {
+  COLOUR_EFFECTS,
+  colourEffectById,
+  defaultColourConfig,
+  gradientStops,
+  type StopsControl,
+} from '../typography/colour'
+import { GradientField } from './GradientField'
 import type {
+  ColourConfigValue,
   ColourEffect,
   ColourSettings,
   PositionedStroke,
   TypographyObject,
 } from '../types/document'
-import { ControlList, PresetGrid } from './presetControls'
+import { ControlList, PresetSelect } from './presetControls'
 import './panels.css'
 
 /**
@@ -99,7 +110,7 @@ function setConfig(
   object: TypographyObject,
   key: 'textColour' | 'shapeColour',
   control: string,
-  value: number | string,
+  value: ColourConfigValue,
 ): void {
   const animation = typographyById(id)?.animation ?? object.animation
   setColour(id, object, key, { config: { ...animation[key].config, [control]: value } })
@@ -110,17 +121,22 @@ function setConfig(
 export function TypeColour({ id, object }: { id: string; object: TypographyObject }) {
   return (
     <>
-      <ColorField
-        label="Colour"
-        value={object.appearance.textFill}
-        onChange={(textFill) => setAppearance(id, { textFill })}
-        onCommit={commitAs('text colour')}
-      />
-
       <EffectPicker
         settings={object.animation.textColour}
+        base={object.appearance.textFill}
+        colour={
+          <ColorField
+            label="Colour"
+            value={object.appearance.textFill}
+            onChange={(textFill) => setAppearance(id, { textFill })}
+            onCommit={commitAs('text colour')}
+          />
+        }
         onEffect={(effect) => {
-          setColour(id, object, 'textColour', { effect, config: defaultColourConfig(effect) })
+          setColour(id, object, 'textColour', {
+            effect,
+            config: defaultColourConfig(effect, object.appearance.textFill),
+          })
           store().commit('Change type colour effect')
         }}
         onConfig={(key, value) => setConfig(id, object, 'textColour', key, value)}
@@ -185,25 +201,38 @@ export function ShapeColour({ id, object }: { id: string; object: TypographyObje
     )
   }
 
+  const typeOnly = (): void => {
+    setAppearance(id, { containerFill: null })
+    store().commit('Hide shape')
+  }
+
   return (
     <>
-      <ColorField
-        label="Shape colour"
-        bare
-        value={object.appearance.containerFill}
-        onChange={(containerFill) => setAppearance(id, { containerFill })}
-        onCommit={commitAs('shape colour')}
-        removeLabel="Type only — no shape colour"
-        onRemove={() => {
-          setAppearance(id, { containerFill: null })
-          store().commit('Hide shape')
-        }}
-      />
-
       <EffectPicker
         settings={object.animation.shapeColour}
+        base={object.appearance.containerFill}
+        colour={
+          <ColorField
+            label="Shape colour"
+            bare
+            value={object.appearance.containerFill}
+            onChange={(containerFill) => setAppearance(id, { containerFill })}
+            onCommit={commitAs('shape colour')}
+            removeLabel="Type only — no shape colour"
+            onRemove={typeOnly}
+          />
+        }
+        removeLabel="Type only — no shape colour"
+        onRemove={typeOnly}
         onEffect={(effect) => {
-          setColour(id, object, 'shapeColour', { effect, config: defaultColourConfig(effect) })
+          setColour(id, object, 'shapeColour', {
+            effect,
+            // The shape's own colour; the type's if the shape has none (the closure cannot see the guard above).
+            config: defaultColourConfig(
+              effect,
+              object.appearance.containerFill ?? object.appearance.textFill,
+            ),
+          })
           store().commit('Change shape colour effect')
         }}
         onConfig={(key, value) => setConfig(id, object, 'shapeColour', key, value)}
@@ -258,27 +287,63 @@ export function OpacityControl({ id, object }: { id: string; object: TypographyO
   )
 }
 
+/**
+ * The effect first, then the colour, then the effect's own controls.
+ *
+ * The colour control keeps its place whatever the effect: a flat colour row
+ * for none, cycle and flicker, and for a gradient the gradient itself — its
+ * stops, where the row was. So choosing Gradient changes nothing on screen
+ * but that one control, and adds nothing but the motion below it.
+ *
+ * The generic list draws the three plain kinds; a gradient's stops are the
+ * one control that is colour's own, and this — the one file that knows the
+ * colour effects — draws it.
+ */
 function EffectPicker({
   settings,
+  base,
+  colour,
   onEffect,
   onConfig,
   onCommit,
+  onRemove,
+  removeLabel,
 }: {
   settings: ColourSettings
+  /** The part's own colour: the gradient's stop 0 when a config predates stops. */
+  base: string
+  /** The flat colour row, shown for every effect but the gradient. */
+  colour: ReactNode
   onEffect: (effect: ColourEffect) => void
-  onConfig: (key: string, value: number | string) => void
+  onConfig: (key: string, value: ColourConfigValue) => void
   onCommit: (label: string) => () => void
+  onRemove?: () => void
+  removeLabel?: string
 }) {
   const effect = colourEffectById(settings?.effect ?? 'none')
+  const stopsControl = effect.controls.find((control): control is StopsControl => control.kind === 'stops')
+  const plain = effect.controls.filter((control): control is AnimationControl => control.kind !== 'stops')
   return (
     <>
-      <PresetGrid
+      <PresetSelect
+        label="Colour effect"
         options={COLOUR_EFFECTS.map((e) => ({ id: e.id, label: e.label }))}
         value={effect.id}
         onChange={(next) => onEffect(next as ColourEffect)}
       />
+      {stopsControl ? (
+        <GradientField
+          control={stopsControl}
+          stops={gradientStops(settings?.config ?? {}, base)}
+          onChange={(stops) => onConfig('stops', stops)}
+          onCommit={(label) => onCommit(label)()}
+          {...(onRemove ? { onRemove, removeLabel } : {})}
+        />
+      ) : (
+        colour
+      )}
       <ControlList
-        controls={effect.controls}
+        controls={plain}
         config={settings?.config ?? {}}
         onChange={onConfig}
         onCommit={onCommit}

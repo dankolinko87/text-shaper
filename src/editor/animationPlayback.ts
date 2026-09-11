@@ -3,6 +3,7 @@ import { fitKey } from './fitKey'
 import { sameArrangement } from '../frame/frame'
 import { sameGeometry } from '../mosaic/dissection'
 import type {
+  DocumentObject,
   FrameObject,
   LetterMosaicObject,
   TextShaperDocument,
@@ -226,64 +227,71 @@ export function frameRuns(object: FrameObject): boolean {
   )
 }
 
-/**
- * The frames that should be moving, and on which clock.
- *
- * The mosaic's rule exactly, one object kind along: the global play button runs
- * every frame together on one shared clock, and a preview runs the one being
- * worked on, keeping its own position so pausing and playing picks up where it
- * left off.
- */
-export function animatingFrameIds(
-  doc: TextShaperDocument,
-  state: {
-    playing: boolean
-    previewing: string | null
-    interacting?: string | null
-    /**
-     * A frame spread into a row of windows, which cannot animate: it shows
-     * every keyframe at once, so a play head has nowhere to be.
-     */
-    spread?: string | null
-  },
-): { ids: string[]; shared: boolean } {
-  /*
-   * A frame with a member under the pointer holds still, exactly as a shape
-   * under direct manipulation does. Otherwise the clock repaints the member
-   * from a moment that belongs to no state while it is being dragged, and the
-   * gesture ends by measuring against a picture that was never the arrangement.
+/** What the loop is told about where the cursor is standing. */
+export interface StatedPlaybackState {
+  /** The global play button: everything that moves, moves. */
+  playing: boolean
+  /** The one object the panel's transport is previewing, if any. */
+  previewing: string | null
+  /** The object under direct manipulation, which holds still for the gesture. */
+  interacting?: string | null
+  /**
+   * The object spread into a row of windows, which cannot animate: it shows
+   * every keyframe at once, so a play head has nowhere to be.
    */
+  spread?: string | null
+}
+
+/**
+ * The stated objects of one kind that should be moving, and on which clock.
+ *
+ * One rule for every kind: the global play button runs every object of the
+ * kind together on one shared clock — objects of the same length stay in step,
+ * which is what playing them together is for — and a preview runs the one
+ * being worked on, keeping its own position so pausing and playing picks up
+ * where it left off. The global button wins while it is on: its list already
+ * contains whatever the panel was previewing, and two clocks driving one
+ * object would fight.
+ *
+ * An object under the pointer holds still, exactly as a shape under direct
+ * manipulation does — otherwise the clock repaints it from a moment that
+ * belongs to no state while it is being dragged, and the gesture ends by
+ * measuring against a picture that was never the arrangement. A spread object
+ * holds still for the length of the spread.
+ */
+function animatingStatedIds<T extends DocumentObject>(
+  doc: TextShaperDocument,
+  state: StatedPlaybackState,
+  is: (object: DocumentObject) => object is T,
+  runs: (object: T) => boolean,
+): { ids: string[]; shared: boolean } {
   const held = state.interacting ?? null
   const spread = state.spread ?? null
   const still = (id: string): boolean => id === held || id === spread
   if (state.playing) {
     const ids = doc.objectOrder.filter((id) => {
       const object = doc.objects[id]
-      return Boolean(object && object.visible && isFrame(object) && frameRuns(object) && !still(id))
+      return Boolean(object && object.visible && is(object) && runs(object) && !still(id))
     })
     return { ids, shared: true }
   }
 
   if (!state.previewing || still(state.previewing)) return { ids: [], shared: false }
   const object = doc.objects[state.previewing]
-  if (!object || !isFrame(object) || !object.visible) return { ids: [], shared: false }
+  if (!object || !is(object) || !object.visible) return { ids: [], shared: false }
   return { ids: [state.previewing], shared: false }
+}
+
+export function animatingFrameIds(
+  doc: TextShaperDocument,
+  state: StatedPlaybackState,
+): { ids: string[]; shared: boolean } {
+  return animatingStatedIds(doc, state, isFrame, frameRuns)
 }
 
 export function animatingMosaicIds(
   doc: TextShaperDocument,
-  state: { playing: boolean; previewing: string | null },
+  state: StatedPlaybackState,
 ): { ids: string[]; shared: boolean } {
-  if (state.playing) {
-    const ids = doc.objectOrder.filter((id) => {
-      const object = doc.objects[id]
-      return Boolean(object && object.visible && isMosaic(object) && mosaicMoves(object))
-    })
-    return { ids, shared: true }
-  }
-
-  if (!state.previewing) return { ids: [], shared: false }
-  const object = doc.objects[state.previewing]
-  if (!object || !isMosaic(object) || !object.visible) return { ids: [], shared: false }
-  return { ids: [state.previewing], shared: false }
+  return animatingStatedIds(doc, state, isMosaic, mosaicMoves)
 }

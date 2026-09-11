@@ -11,7 +11,7 @@ import {
 } from "./colourParts";
 import { FramePanel } from "./FramePanel";
 import { ColourChip, Section, StrokeChip } from "./Section";
-import { GridSection, PlaybackSection } from "./StateList";
+import { MosaicStatePanel } from "./StateList";
 import {
   Button,
   ColorField,
@@ -22,6 +22,8 @@ import { FONTS } from "../fonts/manifest";
 import { typographyById, useDocumentStore } from "../state/documentStore";
 import { useUiStore } from "../state/uiStore";
 import { useSelectedObject } from "./selection";
+import { gradientCss } from "./gradientCss";
+import { gradientStops } from "../typography/colour";
 import { currentTypeSettings, updateShape } from "./memberEdits";
 import {
   MIN_LINE_HEIGHT,
@@ -73,6 +75,8 @@ interface PropertiesPanelProps {
 export function PropertiesPanel({ warnings, autoSizes, lineCounts }: PropertiesPanelProps) {
   const selection = useDocumentStore((s) => s.selection);
   const panelTab = useUiStore((s) => s.panelTab);
+  /* Which of the selection's states is on show, for a panel that describes one state. */
+  const shownIndex = useUiStore((s) => (selection[0] ? (s.mosaicStates[selection[0]] ?? 0) : 0));
   const artboardBackground = useDocumentStore((s) => s.doc.artboard.background);
   const setPanelTab = useUiStore((s) => s.setPanelTab);
   // What the panel is about, answered by the one function every surface asks.
@@ -157,26 +161,21 @@ export function PropertiesPanel({ warnings, autoSizes, lineCounts }: PropertiesP
    */
   if (object.kind === "mosaic") {
     /*
-     * No tabs at all.
-     *
-     * Design / Colour / Animate sliced a mosaic by KIND of property, but almost
-     * everything a mosaic has belongs to a STATE — its lines, spacing, corners,
-     * colours, letters, font and timing alike. So the state picker had to be
-     * hoisted above the tabs to govern all three, and each tab was then editing
-     * a state named somewhere else on screen.
-     *
-     * Turned inside out: the grid every state shares, then the states, each
-     * holding its own four parts. See `StateList`.
+     * No tabs at all: almost everything a mosaic has belongs to a STATE — its
+     * lines, spacing, corners, colours, letters, font and timing alike. So the
+     * panel describes the state on show, named in its header; the grid every
+     * state shares and the clock they play to fold above the list in the rail.
      */
+    const at = Math.min(shownIndex, object.states.length - 1);
     return (
       <aside className="panel panel--properties" aria-label="Properties">
+        {/* The object's name lives in the rail; here, the state this panel is about. */}
         <header className="panel__header">
-          <h2 className="panel__title">{object.name}</h2>
+          <h2 className="panel__title">State {at + 1}</h2>
         </header>
 
         <div className="panel__scroll">
-          <GridSection object={object} />
-          <PlaybackSection object={object} />
+          <MosaicStatePanel object={object} at={at} />
         </div>
       </aside>
     );
@@ -187,10 +186,11 @@ export function PropertiesPanel({ warnings, autoSizes, lineCounts }: PropertiesP
    * every state shares at the top, then the states themselves.
    */
   if (object.kind === "frame") {
+    const at = Math.min(shownIndex, object.states.length - 1);
     return (
       <aside className="panel panel--properties" aria-label="Properties">
         <header className="panel__header">
-          <h2 className="panel__title">{object.name}</h2>
+          <h2 className="panel__title">State {at + 1}</h2>
         </header>
 
         <div className="panel__scroll">
@@ -219,7 +219,7 @@ export function PropertiesPanel({ warnings, autoSizes, lineCounts }: PropertiesP
             type="button"
             role="tab"
             aria-selected={panelTab === tab}
-            className={`panel__tab${panelTab === tab ? " panel__tab--active" : ""}`}
+            className="panel__tab"
             onClick={() => setPanelTab(tab)}
           >
             {tab === "design" ? "Design" : "Animate"}
@@ -285,6 +285,54 @@ export function PropertiesPanel({ warnings, autoSizes, lineCounts }: PropertiesP
               </select>
             </div>
 
+            {/* The type's own measure, beside the face it is set in. */}
+            {/*
+              The GAP between the lines, which is all this has ever set on a
+              run: a turn is the line height plus this. It is named for that
+              where it means that, and hidden from a single lap, which has
+              nothing to space itself against.
+            */}
+            {object.fittingMode !== "path" &&
+              (object.fittingMode !== "ring" ||
+                object.run.turns === "many") && (
+                <Slider
+                  label={
+                    object.fittingMode === "ring" ? "Line gap" : "Line spacing"
+                  }
+                  value={object.typography.lineSpacing}
+                  min={0.5}
+                  max={4}
+                  step={0.01}
+                  format={(v) => v.toFixed(2)}
+                  onChange={(lineSpacing) =>
+                    updateShape(id, {
+                      typography: { ...object.typography, lineSpacing },
+                    })
+                  }
+                  onCommit={() =>
+                    useDocumentStore.getState().commit("Change line spacing")
+                  }
+                />
+              )}
+
+            <Slider
+              label="Letter spacing"
+              value={object.typography.letterSpacing}
+              min={-0.05}
+              max={0.4}
+              step={0.005}
+              // Shown as a percentage of the em, the way type is normally tracked.
+              format={(v) => `${Math.round(v * 100)}%`}
+              onChange={(letterSpacing) =>
+                updateShape(id, {
+                  typography: { ...object.typography, letterSpacing },
+                })
+              }
+              onCommit={() =>
+                useDocumentStore.getState().commit("Change letter spacing")
+              }
+            />
+
             {/*
               Two ways of filling a shape, not four. Line stretch and glyph
               stretch were the steps on the way to warping and are not offered;
@@ -334,53 +382,6 @@ export function PropertiesPanel({ warnings, autoSizes, lineCounts }: PropertiesP
             />
 
             <TypeColour id={id} object={object} />
-
-            {/*
-              The GAP between the lines, which is all this has ever set on a
-              run: a turn is the line height plus this. It is named for that
-              where it means that, and hidden from a single lap, which has
-              nothing to space itself against.
-            */}
-            {object.fittingMode !== "path" &&
-              (object.fittingMode !== "ring" ||
-                object.run.turns === "many") && (
-                <Slider
-                  label={
-                    object.fittingMode === "ring" ? "Line gap" : "Line spacing"
-                  }
-                  value={object.typography.lineSpacing}
-                  min={0.5}
-                  max={4}
-                  step={0.01}
-                  format={(v) => v.toFixed(2)}
-                  onChange={(lineSpacing) =>
-                    updateShape(id, {
-                      typography: { ...object.typography, lineSpacing },
-                    })
-                  }
-                  onCommit={() =>
-                    useDocumentStore.getState().commit("Change line spacing")
-                  }
-                />
-              )}
-
-            <Slider
-              label="Letter spacing"
-              value={object.typography.letterSpacing}
-              min={-0.05}
-              max={0.4}
-              step={0.005}
-              // Shown as a percentage of the em, the way type is normally tracked.
-              format={(v) => `${Math.round(v * 100)}%`}
-              onChange={(letterSpacing) =>
-                updateShape(id, {
-                  typography: { ...object.typography, letterSpacing },
-                })
-              }
-              onCommit={() =>
-                useDocumentStore.getState().commit("Change letter spacing")
-              }
-            />
           </Section>
 
           {/*
@@ -431,7 +432,20 @@ export function PropertiesPanel({ warnings, autoSizes, lineCounts }: PropertiesP
           {object.fittingMode !== "path" ? (
             <Section
               title="Shape"
-              summary={<ColourChip value={object.appearance.containerFill} />}
+              summary={
+                <ColourChip
+                  value={
+                    object.animation.shapeColour.effect === 'gradient'
+                      ? gradientCss(
+                          gradientStops(
+                            object.animation.shapeColour.config,
+                            object.appearance.containerFill ?? object.appearance.textFill,
+                          ),
+                        )
+                      : object.appearance.containerFill
+                  }
+                />
+              }
               open={open.has("shape")}
               onToggle={toggle("shape")}
             >

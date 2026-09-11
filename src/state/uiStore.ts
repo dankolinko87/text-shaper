@@ -66,14 +66,16 @@ export interface UiState {
    */
   insideFrame: string | null
   /**
-   * The frame drawn as a ROW of windows, one per state, if any.
+   * The object with states drawn as a ROW of windows, one per state, if any —
+   * a mosaic or a frame.
    *
    * Ephemeral like `insideFrame`, and for the same reason: how you are looking
-   * at a frame is not the artwork. Spreading goes inside as well, so the panel,
-   * the member write paths, the point editor and the Escape ladder all work
-   * unchanged; leaving the frame collapses the row.
+   * at a thing is not the artwork. What spreading ALSO does depends on the
+   * kind — a frame is entered, because its windows exist to pick members in —
+   * and is decided where the kinds are told apart (`editor/stated.ts`), not
+   * here. Leaving a frame folds its row.
    */
-  spreadFrame: string | null
+  spread: string | null
   /**
    * Which member is picked out inside that frame, by member id.
    *
@@ -175,7 +177,7 @@ export interface UiState {
   setEditingPoints: (id: string | null) => void
   setInsideFrame: (id: string | null) => void
   setFrameSelection: (members: string[]) => void
-  setSpreadFrame: (id: string | null) => void
+  setSpread: (id: string | null) => void
   /**
    * The pick, as one write: which members, and which STATE they were picked
    * in. Read off the Fabric child's parent by the selection handler, so that
@@ -250,7 +252,7 @@ export const useUiStore = create<UiState>()((set, get) => ({
   temporaryTool: null,
   editingPoints: null,
   insideFrame: null,
-  spreadFrame: null,
+  spread: null,
   frameSelection: [],
   playing: false,
   previewObject: null,
@@ -303,20 +305,20 @@ export const useUiStore = create<UiState>()((set, get) => ({
    * while nothing on screen is in it, which is the bug the mosaic's own
    * teardown exists to prevent.
    */
-  // Leaving a frame collapses its row too: a spread with nothing inside it is
-  // not a state anything can be in.
+  // Leaving a frame folds ITS row too: a spread frame with nobody inside it is
+  // not a state anything can be in. Another object's row is not its business.
   setInsideFrame: (insideFrame) =>
-    set(
+    set((state) =>
       insideFrame === null
-        ? { insideFrame: null, frameSelection: [], spreadFrame: null }
+        ? {
+            insideFrame: null,
+            frameSelection: [],
+            spread: state.spread === state.insideFrame ? null : state.spread,
+          }
         : { insideFrame },
     ),
-  setSpreadFrame: (spreadFrame) =>
-    set(
-      spreadFrame === null
-        ? { spreadFrame: null, frameSelection: [] }
-        : { spreadFrame, insideFrame: spreadFrame, frameSelection: [] },
-    ),
+  // Either way the member pick goes: the row is a new place to be looking.
+  setSpread: (spread) => set({ spread, frameSelection: [] }),
   setFrameSelection: (frameSelection) => set({ frameSelection }),
   setFramePick: (frame, frameSelection, at) =>
     set((state) => ({

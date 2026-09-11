@@ -3,7 +3,8 @@ import { useMemo } from 'react'
 import { valuesFor } from '../frame/frame'
 import { useDocumentStore } from '../state/documentStore'
 import { useUiStore } from '../state/uiStore'
-import type { DocumentObject, FrameObject, LetterMosaicObject } from '../types/document'
+import type { DocumentObject, Stated } from '../types/document'
+import { isStated } from '../types/document'
 import type { FrameMember } from '../types/frame'
 import { memberAsDrawn } from './renderer'
 
@@ -39,7 +40,7 @@ export interface Selected {
   /** Where the panel's edits go: the member's own object id, or the selection's. */
   id: string | undefined
   /** The object whose STATES are on show, if the selection has any. */
-  stated: LetterMosaicObject | FrameObject | undefined
+  stated: Stated | undefined
 }
 
 const NOTHING: Selected = {
@@ -104,7 +105,7 @@ export function selectedObject(
     member,
     object: member ? memberAsDrawn(member, valuesFor(member, memberState)) : selected,
     id: member ? member.object.id : selectedId,
-    stated: selected.kind === 'mosaic' || selected.kind === 'frame' ? selected : undefined,
+    stated: isStated(selected) ? selected : undefined,
   }
 }
 

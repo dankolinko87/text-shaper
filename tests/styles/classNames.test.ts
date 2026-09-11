@@ -73,6 +73,9 @@ function defined(): Set<string> {
     const source = readFileSync(file, 'utf8')
       .replace(/\/\*[\s\S]*?\*\//g, '')
       .replace(/^\s*@import[^\n]*$/gm, '')
+      // A `url(…)` is a resource, not a selector: `www.w3.org` in a data URI
+      // is neither `.w3` nor `.org`.
+      .replace(/url\([^)]*\)/g, 'url()')
     for (const match of source.matchAll(/\.([a-zA-Z_][\w-]*)/g)) out.add(match[1] as string)
   }
   return out

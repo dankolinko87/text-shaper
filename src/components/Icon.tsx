@@ -24,6 +24,7 @@ import {
   Pause,
   Pencil,
   PenTool,
+  Pipette,
   Play,
   Plus,
   Redo2,
@@ -74,6 +75,7 @@ export type IconName =
   | 'splitVertical'
   | 'spread'
   | 'more'
+  | 'pipette'
   | 'collapse'
   | 'splitHorizontal'
 
@@ -160,6 +162,8 @@ const ICONS: Record<IconName, LucideIcon> = {
   spread: GalleryHorizontal,
   // Three dots: a few more actions, kept behind one glyph until wanted.
   more: Ellipsis,
+  // The eyedropper: pick a colour from anything on the screen.
+  pipette: Pipette,
   // The spread's other half: one window again. The same glyph as `stop`, which
   // is fine — a square is a square, and the two never share a bar.
   collapse: Square,

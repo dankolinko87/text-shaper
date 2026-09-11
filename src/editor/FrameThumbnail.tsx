@@ -170,7 +170,7 @@ function artworkFor(
 /** A paint as one colour; a gradient answers with the colour it starts from. */
 function solid(paint: FillPaint | null | undefined): string | null {
   if (!paint) return null
-  return paint.kind === 'solid' ? paint.colour : paint.from
+  return paint.kind === 'solid' ? paint.colour : (paint.stops[0]?.colour ?? null)
 }
 
 function draw(object: FrameObject, state: FrameState): ReactElement {

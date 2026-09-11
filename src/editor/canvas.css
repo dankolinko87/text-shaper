@@ -32,6 +32,9 @@
  * that would run into the tools, its top.
  */
 .object-bar {
+  /* The pill, in the selection's own deep green: it belongs to the thing you have hold of. */
+  --pill-bg: var(--selection-deep);
+  --pill-edge: rgba(255, 255, 255, 0.14);
   position: absolute;
   translate: -50% 0;
   z-index: var(--z-canvas-bar);
@@ -76,8 +79,8 @@
  * The number over each window of a spread frame — `SpreadChips`.
  *
  * Anchored by its bottom-left to the window's top-left corner, a hair above
- * it. White on the page and black when it is the state being shown: the same
- * two colours as the bar, the other way up.
+ * it. Dark green on white on the page, and solid dark green when it is the
+ * state being shown: the bar's own green, the other way up.
  */
 .spread-chip {
   position: absolute;
@@ -88,10 +91,10 @@
   min-width: 16px;
   height: 15px;
   padding: 0 var(--space-2);
-  border: 1px solid rgba(0, 0, 0, 0.4);
+  border: 1px solid var(--selection-border);
   border-radius: var(--radius-lg);
   background: var(--pill-fg);
-  color: var(--pill-bg);
+  color: var(--selection-deep);
   font-size: var(--text-md);
   font-weight: 500;
   line-height: 1;
@@ -101,11 +104,11 @@
     color var(--duration-fast) var(--ease);
 }
 .spread-chip:hover {
-  border-color: rgba(0, 0, 0, 0.7);
+  border-color: var(--selection-deep);
 }
 .spread-chip[data-shown='true'] {
   border-color: transparent;
-  background: var(--pill-bg);
+  background: var(--selection-deep);
   color: var(--pill-fg);
 }
 .spread-chip:focus-visible {
@@ -134,8 +137,8 @@
 .spread-insert__button {
   width: 20px;
   height: 20px;
-  border: 1px solid var(--pill-edge);
-  background: var(--pill-bg);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: var(--selection-deep);
   color: var(--pill-fg);
   box-shadow: var(--shadow-sm);
   opacity: 0;
@@ -148,5 +151,22 @@
   opacity: 1;
 }
 .spread-insert__button:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--pill-bg) 80%, var(--pill-fg));
+  background: color-mix(in srgb, var(--selection-deep) 80%, var(--pill-fg));
+}
+
+/* The selected object's name, above its top-left corner — `ObjectLabel`. */
+.object-label {
+  position: absolute;
+  translate: 0 calc(-100% - 4px);
+  z-index: var(--z-canvas-bar);
+  max-width: 240px;
+  overflow: hidden;
+  color: var(--selection);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  pointer-events: none;
+  user-select: none;
 }

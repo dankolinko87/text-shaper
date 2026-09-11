@@ -1,6 +1,8 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react'
 
 import { alphaOf, withAlpha } from '../typography/colour'
+import { ColorPicker } from './ColorPicker'
+import { useDismiss } from './useDismiss'
 import type { PositionedStroke, Stroke, StrokePosition } from '../types/document'
 import { Icon, type IconName } from './Icon'
 import './controls.css'
@@ -292,7 +294,7 @@ export function Slider({
  * One editing session is one history entry: drafts preview without committing
  * and the commit fires once, on Enter or on the way out.
  */
-function DraftNumber({
+export function DraftNumber({
   label,
   value,
   onPreview,
@@ -429,6 +431,52 @@ interface ColorFieldProps {
   /** Take the colour away — a fill that can be absent, a border, a banner. */
   onRemove?: () => void
   removeLabel?: string
+  /** The remove control shown but refused — a gradient at its last two stops. */
+  removeDisabled?: boolean
+}
+
+/**
+ * The hex, typed. Shown without its `#` — every value here is a colour, so the
+ * sign says nothing — and accepting up to eight digits so an opacity can be
+ * typed as well as slid. One parser, used by the colour row and by the picker.
+ */
+export function HexInput({
+  label,
+  value,
+  mixed = false,
+  emptyLabel = 'Mixed',
+  disabled = false,
+  onChange,
+  onCommit,
+}: {
+  label: string
+  value: string
+  mixed?: boolean
+  emptyLabel?: string
+  disabled?: boolean
+  onChange: (value: string) => void
+  onCommit?: () => void
+}) {
+  return (
+    <input
+      className="color-field__hex"
+      /*
+       * With a mixed selection the field says so rather than showing the first
+       * tile's value as if it spoke for the rest. Typing a colour still applies
+       * it to everything selected — the emptiness is a readout, not a refusal.
+       */
+      value={mixed ? '' : value.replace(/^#/, '')}
+      placeholder={mixed ? emptyLabel : undefined}
+      disabled={disabled}
+      spellCheck={false}
+      aria-label={`${label} hex value${mixed ? `, ${emptyLabel.toLowerCase()}` : ''}`}
+      onChange={(e) => {
+        const next = e.target.value.replace(/^#/, '')
+        if (/^[0-9a-fA-F]{0,8}$/.test(next)) onChange(`#${next}`)
+      }}
+      onBlur={onCommit}
+    />
+  )
 }
 
 export function ColorField({
@@ -442,22 +490,23 @@ export function ColorField({
   bare = false,
   onRemove,
   removeLabel = 'Remove',
+  removeDisabled = false,
 }: ColorFieldProps) {
   const id = useId()
   const alpha = alphaOf(value)
   /*
-   * The native picker cannot carry transparency — it hands back six digits
-   * whatever it was given — so the shade it returns is put back on top of the
-   * opacity already chosen rather than replacing the colour outright. Picking a
-   * new shade on a half-visible fill leaves it half visible.
+   * The swatch is a button, and the picker it opens lives in a portal — the
+   * panels clip anything positioned inside them. Dismissal names both the
+   * swatch and the picker; closing hands focus back to the swatch.
    */
-  const shade = withAlpha(value, 1)
-  /*
-   * One row, the shape Figma's is: swatch and hex in one well, the opacity as
-   * a percentage in a second, and the remove control at the end. The `#` is
-   * not shown — every hex here is a colour, so the sign says nothing.
-   */
-  const hex = mixed ? '' : value.replace(/^#/, '')
+  const swatchRef = useRef<HTMLButtonElement>(null)
+  const popoverRef = useRef<HTMLDivElement>(null)
+  const [open, setOpen] = useState(false)
+  const close = useCallback(() => {
+    setOpen(false)
+    swatchRef.current?.focus()
+  }, [])
+  useDismiss(open, close, swatchRef, popoverRef)
 
   return (
     <div className="field" data-disabled={disabled || undefined}>
@@ -468,38 +517,29 @@ export function ColorField({
       )}
       <div className="color-field" data-mixed={mixed || undefined}>
         <span className="color-field__well">
-          <span className="color-field__swatch">
+          <button
+            type="button"
+            id={id}
+            ref={swatchRef}
+            className="color-field__swatch"
+            aria-label={mixed ? `${label}, ${emptyLabel.toLowerCase()}` : label}
+            aria-haspopup="dialog"
+            aria-expanded={open}
+            disabled={disabled}
+            onClick={() => setOpen((was) => !was)}
+          >
             {/* Checks behind, so transparency reads as transparency and not as a
                 lighter colour. */}
             <span className="color-field__fill" style={{ background: value }} />
-            <input
-              id={id}
-              type="color"
-              value={shade}
-              disabled={disabled}
-              aria-label={mixed ? `${label}, ${emptyLabel.toLowerCase()}` : label}
-              onChange={(e) => onChange(withAlpha(e.target.value, alpha))}
-              onBlur={onCommit}
-            />
-          </span>
-          <input
-            className="color-field__hex"
-            /*
-             * With a mixed selection the field says so rather than showing the
-             * first tile's value as if it spoke for the rest. Typing a colour
-             * still applies it to everything selected — the emptiness is a
-             * readout, not a refusal.
-             */
-            value={hex}
-            placeholder={mixed ? emptyLabel : undefined}
+          </button>
+          <HexInput
+            label={label}
+            value={value}
+            mixed={mixed}
+            emptyLabel={emptyLabel}
             disabled={disabled}
-            spellCheck={false}
-            aria-label={`${label} hex value${mixed ? `, ${emptyLabel.toLowerCase()}` : ''}`}
-            onChange={(e) => {
-              const next = e.target.value.replace(/^#/, '')
-              if (/^[0-9a-fA-F]{0,8}$/.test(next)) onChange(`#${next}`)
-            }}
-            onBlur={onCommit}
+            onChange={onChange}
+            onCommit={onCommit}
           />
         </span>
         <span className="color-field__alpha">
@@ -522,11 +562,22 @@ export function ColorField({
             label={removeLabel}
             small
             tooltipSide="top"
-            disabled={disabled}
+            disabled={disabled || removeDisabled}
             onClick={onRemove}
           />
         ) : null}
       </div>
+      {open ? (
+        <ColorPicker
+          label={label}
+          value={value}
+          anchor={swatchRef}
+          popoverRef={popoverRef}
+          onChange={onChange}
+          onCommit={onCommit}
+          onClose={close}
+        />
+      ) : null}
     </div>
   )
 }
