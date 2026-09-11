@@ -19,6 +19,13 @@ import { createId } from '../utils/id'
  */
 export const ARTBOARD_WIDTH = 1200
 export const ARTBOARD_HEIGHT = 800
+/*
+ * The page's colour until somebody chooses one: a light grey, as Figma's
+ * canvas is, so white artwork has an edge to be seen against and black type
+ * is not shouting off a white sheet. One constant, read by the document and
+ * by the exports' fallback alike.
+ */
+export const ARTBOARD_BACKGROUND = '#e5e5e5'
 
 export const defaultFontSettings: FontSettings = {
   fontId: DEFAULT_FONT_ID,
@@ -143,7 +150,7 @@ export function createEmptyDocument(name = 'Untitled'): TextShaperDocument {
     artboard: {
       width: ARTBOARD_WIDTH,
       height: ARTBOARD_HEIGHT,
-      background: '#f4f4f2',
+      background: ARTBOARD_BACKGROUND,
     },
     objects: {},
     objectOrder: [],

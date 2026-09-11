@@ -5,7 +5,17 @@
   overflow: hidden;
 }
 
+/*
+ * The body is the canvas, edge to edge, with the panels floating over it.
+ *
+ * Neither panel takes space from the stage: the states rail and the
+ * properties panel are cards standing a little in from the edges, over the
+ * artwork, the way Figma's are. So the canvas is one size whether the rail is
+ * open or shut, and opening it moves nothing — the drawing under it is
+ * covered, not pushed.
+ */
 .app__body {
+  position: relative;
   display: flex;
   flex: 1;
   min-height: 0;
@@ -24,9 +34,9 @@
  * The states rail, on the left.
  *
  * Its width is the animation: zero with nothing selected that has states, the
- * panel width when something does. The panel inside is a fixed width so the
+ * panel width when something does. The card inside is a fixed width so the
  * rail clips it rather than squashing it, and fades and slides on its own so
- * the open reads as a panel arriving rather than a curtain drawing.
+ * the open reads as a card arriving rather than a curtain drawing.
  *
  * Opening is a mount keyframe — the content mounts in the same commit the
  * width flips, so there is no earlier state to transition from — and closing
@@ -34,9 +44,13 @@
  * it (see `StatesRail`). Both are zero under reduced motion.
  */
 .app__rail {
+  position: absolute;
+  top: var(--panel-gap);
+  bottom: var(--panel-gap);
+  left: var(--panel-gap);
+  z-index: var(--z-panel);
   display: flex;
   width: 0;
-  flex-shrink: 0;
   overflow: hidden;
   transition: width var(--duration-slow) var(--ease);
 }
@@ -55,11 +69,14 @@
 }
 
 .app__sidebar {
+  position: absolute;
+  top: var(--panel-gap);
+  right: var(--panel-gap);
+  bottom: var(--panel-gap);
+  z-index: var(--z-panel);
   display: flex;
   flex-direction: column;
   width: var(--panel-width);
-  min-height: 0;
-  flex-shrink: 0;
 }
 
 .loading-overlay__detail {

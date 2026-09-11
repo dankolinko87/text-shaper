@@ -10,6 +10,7 @@ import {
 } from '../mosaic/timeline'
 import type { LetterMosaicObject, Rect } from '../types/document'
 import { DEFAULT_GLYPH_COLOUR } from '../types/mosaic'
+import { ARTBOARD_BACKGROUND } from '../state/defaults'
 
 /**
  * A letter mosaic, written out as an animated GIF.
@@ -120,7 +121,7 @@ export async function renderMosaicGif(options: MosaicGifOptions): Promise<Uint8A
 
     ctx.clearRect(0, 0, size, size)
     if (background === 'solid') {
-      ctx.fillStyle = options.artboard ?? '#f4f4f2'
+      ctx.fillStyle = options.artboard ?? ARTBOARD_BACKGROUND
       ctx.fillRect(0, 0, size, size)
     }
 

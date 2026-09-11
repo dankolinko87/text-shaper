@@ -25,13 +25,13 @@
   justify-content: flex-end;
 }
 /*
- * The mark.
+ * The mark, which is also the light switch.
  *
  * Full-strength text colour, unlike the quiet uppercase label it replaces: a
  * wordmark spelled out in small caps had to stay out of the way, and a mark this
- * compact can carry the app's identity without competing with anything. It is
- * not a button — nothing happens when you press it — so it gets no hover state
- * to promise otherwise.
+ * compact can carry the app's identity without competing with anything. It IS
+ * a button now — pressing it turns the palette over — so it takes a hover, but
+ * a quiet one: the mark should read as the mark first and as a control second.
  *
  * `flex-shrink: 0` because the row beside it holds a text field that will
  * happily squeeze its neighbours; a squashed logo is worse than a narrow field.
@@ -41,7 +41,19 @@
   align-items: center;
   flex-shrink: 0;
   margin-right: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
   color: var(--text-primary);
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease);
+}
+.topbar__logo:hover {
+  background: var(--surface-3);
+}
+.topbar__logo:active {
+  background: var(--surface-2);
 }
 
 .topbar__name {
@@ -76,12 +88,22 @@
  * day and the 32px buttons are the size every other button in the app is.
  */
 .toolbar {
+  /* The pill's colours, from the tool pill's own set — which follows the theme. */
   --pill-height: var(--tool-pill-height);
+  --pill-bg: var(--tool-pill-bg);
+  --pill-fg: var(--tool-pill-fg);
+  --pill-edge: var(--tool-pill-edge);
+  --pill-line: var(--tool-pill-line);
   position: absolute;
   left: 50%;
   bottom: var(--space-6);
   translate: -50% 0;
   z-index: var(--z-toolbar);
+}
+/* A rounded rectangle rather than the pill's full round: the same corners as
+   the panels it floats among. The bar under an object keeps the pill. */
+.toolbar.pill {
+  border-radius: var(--panel-radius);
 }
 .toolbar__group {
   display: flex;
@@ -276,21 +298,27 @@
  * class written with no rule and on a rule written for no class.
  * ------------------------------------------------------------------ */
 
+/*
+ * A panel is a card: it floats over the canvas with a hairline, a radius and
+ * a shadow, and clips its own contents to its corners.
+ */
 .panel {
   background:var(--surface-1);
   flex-direction:column;
   min-height:0;
   display:flex;
+  border: 1px solid var(--border-default);
+  border-radius: var(--panel-radius);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
 }
 .panel--properties {
   width:var(--panel-width);
-  border-left:1px solid var(--border-subtle);
   flex:auto;
 }
 .panel--states {
   width: var(--panel-width);
   flex: none;
-  border-right: 1px solid var(--border-subtle);
   animation: rail-in var(--duration-slow) var(--ease);
   transition:
     opacity var(--duration-slow) var(--ease),

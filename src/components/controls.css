@@ -264,11 +264,13 @@
   white-space: nowrap;
   pointer-events: none;
   box-shadow: var(--shadow-md);
-  opacity: 0;
-  transition: opacity var(--duration-fast) var(--ease);
+  /* It mounts when shown, so arriving is a keyframe; leaving is instant. */
+  animation: tooltip-in var(--duration-fast) var(--ease);
 }
-.tooltip[data-visible='true'] {
-  opacity: 1;
+@keyframes tooltip-in {
+  from {
+    opacity: 0;
+  }
 }
 .tooltip[data-side='right'] {
   left: calc(100% + 8px);

@@ -7,6 +7,7 @@ import { animationFrames, fitObject } from '../typography/objectFit'
 import type { DocumentObject, Rect } from '../types/document'
 import { strokeReach } from '../geometry/stroke'
 import { strokeOnContext } from './stroke'
+import { ARTBOARD_BACKGROUND } from '../state/defaults'
 
 /**
  * Animated GIF export.
@@ -107,7 +108,7 @@ export async function renderGif(options: GifExportOptions): Promise<Uint8Array> 
   for (const frame of sequence) {
     ctx.clearRect(0, 0, size, size)
     if (background === 'solid') {
-      ctx.fillStyle = options.artboard ?? '#f4f4f2'
+      ctx.fillStyle = options.artboard ?? ARTBOARD_BACKGROUND
       ctx.fillRect(0, 0, size, size)
     }
 

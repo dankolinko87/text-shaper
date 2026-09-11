@@ -72,10 +72,18 @@ export function Tooltip({ label, shortcut, side = 'bottom', children }: TooltipP
       onBlur={hide}
     >
       {children}
-      <span className="tooltip" data-visible={visible} data-side={side} role="presentation">
-        {label}
-        {shortcut ? <kbd>{shortcut}</kbd> : null}
-      </span>
+      {/*
+        Mounted only while shown. A hidden tip that stays in the layout still
+        counts towards its scroll container's width — and a long tip beside a
+        control at a panel's edge gave the states rail a horizontal scrollbar
+        for a label nobody could see.
+      */}
+      {visible ? (
+        <span className="tooltip" data-side={side} role="presentation">
+          {label}
+          {shortcut ? <kbd>{shortcut}</kbd> : null}
+        </span>
+      ) : null}
     </span>
   )
 }

@@ -52,10 +52,12 @@ import { applyColourGuard } from './colourGuard'
 import { firstTile, tileAt } from '../mosaic/tiles'
 import { evaluateFrameAtTime, frameAuthoredTimeFor, valuesFor } from '../frame/frame'
 import { FrameLayer } from './FrameLayer'
+import { FramePlate } from './FramePlate'
 import { memberBoxes } from './frameBoxes'
 import { MosaicLayer } from './MosaicLayer'
 import { spreadHoldsGround } from './frameStates'
 import { ObjectBar } from './ObjectBar'
+import { useSelectedObject } from './selection'
 import { SpreadChips } from './SpreadChips'
 import { PathLayer } from './PathLayer'
 import { PenLayer } from './PenLayer'
@@ -181,12 +183,39 @@ export function EditorCanvas() {
     // container measures 0x0 and the zoom would clamp to its minimum. It is
     // framed on every resize until the user zooms or pans themselves, which
     // also keeps the work in view as the window changes size.
+    /*
+     * Where the stage's top-left corner is on screen, from one resize to the
+     * next. When it MOVES — anything standing to the left of or above the
+     * stage changing size — the artwork must not move with it: the canvas's
+     * origin is the stage's corner, so the same viewport would carry the
+     * drawing along by the shift. The pan is shifted back by exactly that, and
+     * the drawing stays where the eye left it. A resize that keeps the corner
+     * (the window growing at its right edge) changes nothing here. The panels
+     * float over the stage and never move its corner; this is for whatever
+     * one day does.
+     */
+    let origin: { left: number; top: number } | null = null
     const resize = new ResizeObserver(() => {
       const r = container.getBoundingClientRect()
       if (r.width === 0 || r.height === 0) return
 
       canvas.setDimensions({ width: r.width, height: r.height })
       useUiStore.getState().setStageSize({ width: r.width, height: r.height })
+
+      const moved = origin ? { left: r.left - origin.left, top: r.top - origin.top } : null
+      origin = { left: r.left, top: r.top }
+      if (moved && (moved.left !== 0 || moved.top !== 0)) {
+        const vt = canvas.viewportTransform
+        const panX = vt[4] - moved.left
+        const panY = vt[5] - moved.top
+        canvas.setViewportTransform([vt[0], vt[1], vt[2], vt[3], panX, panY])
+        // The store hears the NEW pan, or its mirror writes the old one back a
+        // frame later and the drawing slides after all.
+        const ui = useUiStore.getState()
+        ;(ui.viewportAdjusted ? ui.adjustViewport : ui.setViewport)({ zoom: vt[0], panX, panY })
+        canvas.renderAll()
+        return
+      }
 
       if (!useUiStore.getState().viewportAdjusted) {
         const artboard = useDocumentStore.getState().doc.artboard
@@ -1104,37 +1133,12 @@ export function EditorCanvas() {
     return () => window.removeEventListener('text-shaper:fit', onFit)
   }, [frameContent])
 
-  /* --------------------------------------------------- framing the spread */
   /*
-   * A row four frames wide does not fit where one frame did.
-   *
-   * Opened without this, the view stays where it was and every window past the
-   * first stands off the right edge of the screen — so the feature whose whole
-   * purpose is seeing the states side by side shows one state and no sign that
-   * the others exist. Collapsing puts the view back exactly as it was found,
-   * because the spread is a way of looking and should leave nothing behind.
-   *
-   * After the render effect above, which is what builds the windows that
-   * `contentBounds` has to measure.
+   * The spread does NOT re-frame the view. It used to zoom out to fit the whole
+   * row, and back on collapse; the jump was the thing you noticed, not the row.
+   * The row grows to the right of the frame at the zoom you were at, and the
+   * plate behind it says where it ends. ⇧1 still fits everything.
    */
-  const beforeSpread = useRef<[number, number, number, number, number, number] | null>(null)
-  useEffect(() => {
-    const canvas = fabricRef.current
-    if (!canvas) return
-
-    if (spreadFrame) {
-      beforeSpread.current = [...canvas.viewportTransform] as typeof beforeSpread.current
-      frameContent()
-      return
-    }
-
-    const previous = beforeSpread.current
-    beforeSpread.current = null
-    if (!previous) return
-    canvas.setViewportTransform(previous)
-    useUiStore.getState().adjustViewport({ zoom: previous[0], panX: previous[4], panY: previous[5] })
-    canvas.requestRenderAll()
-  }, [spreadFrame, frameContent])
 
   /* ------------------------------------------------------------ zoom */
   useEffect(() => {
@@ -1254,6 +1258,9 @@ export function EditorCanvas() {
    * `MosaicLayer` hit-tests those itself, which is why it read as "only one
    * glyph can be selected" while everything else had quietly gone dead.
    */
+  /** The frame selected as a whole, if one is — through the one selection rule. */
+  const { stated } = useSelectedObject()
+  const selectedFrame = stated?.kind === 'frame' ? stated : undefined
   /** The frame being worked inside, which owns the canvas while it is. */
   const openFrame = (() => {
     const found = insideFrame ? objectsById[insideFrame] : undefined
@@ -1379,6 +1386,8 @@ export function EditorCanvas() {
         unless you are in one, the same as the layers above it.
       */}
       <FrameLayer canvas={fabricRef.current} object={openFrame} />
+      {/* The plate under the frame you have hold of: the open one, or the selected one. */}
+      <FramePlate canvas={fabricRef.current} object={openFrame ?? selectedFrame} />
       {/*
         The bar under the selected object — play, its states, the spread. HTML
         rather than canvas so it keeps one size at every zoom and can take a

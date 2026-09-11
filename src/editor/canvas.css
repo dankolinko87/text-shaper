@@ -112,3 +112,41 @@
   outline: 1px solid var(--selection);
   outline-offset: 1px;
 }
+
+/*
+ * The + in each gap of a spread row, and after its last window — `SpreadChips`.
+ *
+ * The element is the GAP: an invisible area the size of the space between two
+ * windows, centred on it, and the + appears while the pointer is over that
+ * area (or the button has focus). Shown always, four pluses were four more
+ * things on a row that is there to be read. The pill's own button, made small
+ * and given a plate so it reads over any page colour.
+ */
+.spread-insert {
+  position: absolute;
+  translate: -50% -50%;
+  z-index: var(--z-canvas-bar);
+  display: grid;
+  place-items: center;
+  min-width: 24px;
+  min-height: 24px;
+}
+.spread-insert__button {
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--pill-edge);
+  background: var(--pill-bg);
+  color: var(--pill-fg);
+  box-shadow: var(--shadow-sm);
+  opacity: 0;
+  transition:
+    opacity var(--duration-fast) var(--ease),
+    background var(--duration-fast) var(--ease);
+}
+.spread-insert:hover .spread-insert__button,
+.spread-insert:focus-within .spread-insert__button {
+  opacity: 1;
+}
+.spread-insert__button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--pill-bg) 80%, var(--pill-fg));
+}

@@ -1851,8 +1851,12 @@ export function syncCanvas(input: SyncInput): Map<string, RenderedObject> {
   // a child's effects before its parent's, so an overlay that raised itself was
   // immediately buried again by this very function — the guides disappeared
   // behind the shape being edited on every store update.
+  // The one exception is the plate behind a spread frame's row, which is an
+  // overlay in every sense but the one that matters: it goes UNDER.
   for (const object of canvas.getObjects()) {
-    if (object.get('gridRole')) canvas.bringObjectToFront(object)
+    const role = object.get('gridRole')
+    if (role === 'frame-plate') canvas.sendObjectToBack(object)
+    else if (role) canvas.bringObjectToFront(object)
   }
 
   canvas.requestRenderAll()

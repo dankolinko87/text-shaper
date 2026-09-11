@@ -1,3 +1,4 @@
+import { readTheme, type Theme } from './theme'
 import { create } from 'zustand'
 
 import { MAX_ZOOM, MIN_ZOOM } from '../geometry/viewportMath'
@@ -29,6 +30,8 @@ export type PanelTab = 'design' | 'animate'
  */
 export interface UiState {
   tool: ToolId
+  /** Which palette the UI wears. Kept in the browser, see `theme.ts`. */
+  theme: Theme
   /**
    * Which panel tab is open.
    *
@@ -166,6 +169,7 @@ export interface UiState {
   viewportAdjusted: boolean
 
   setTool: (tool: ToolId) => void
+  setTheme: (theme: Theme) => void
   setPanelTab: (tab: PanelTab) => void
   setTemporaryTool: (tool: ToolId | null) => void
   setEditingPoints: (id: string | null) => void
@@ -241,6 +245,7 @@ export interface UiState {
 
 export const useUiStore = create<UiState>()((set, get) => ({
   tool: 'select',
+  theme: readTheme(typeof window === 'undefined' ? null : window.localStorage),
   panelTab: 'design',
   temporaryTool: null,
   editingPoints: null,
@@ -265,6 +270,8 @@ export const useUiStore = create<UiState>()((set, get) => ({
   clipperReady: false,
   viewportAdjusted: false,
 
+  // The palette is a plain value; App puts it on the document and keeps it.
+  setTheme: (theme) => set({ theme }),
   /*
    * Picking a tool leaves point editing.
    *

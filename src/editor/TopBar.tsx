@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react'
 
-import { IconButton } from '../components/controls'
+import { IconButton, Tooltip } from '../components/controls'
 import { Logo } from '../components/Logo'
 import { useDocumentStore } from '../state/documentStore'
+import { other } from '../state/theme'
+import { useUiStore } from '../state/uiStore'
 import { ExportMenu } from './ExportMenu'
 import { ZoomControl } from './ZoomControl'
 import './panels.css'
@@ -21,16 +23,30 @@ export function TopBar() {
   const past = useDocumentStore((s) => s.past)
   const future = useDocumentStore((s) => s.future)
   const [draftName, setDraftName] = useState(name)
+  const theme = useUiStore((s) => s.theme)
+  const setTheme = useUiStore((s) => s.setTheme)
+  const switchTo = other(theme)
 
   useEffect(() => setDraftName(name), [name])
 
   return (
     <header className="topbar">
       <div className="topbar__section">
-        {/* The mark, then the document's name — nothing between them but space. */}
-        <span className="topbar__logo">
-          <Logo />
-        </span>
+        {/*
+          The mark is the light switch. Pressing it turns the palette over —
+          the one control that is about the app itself rather than the
+          document, on the one element that is the app itself.
+        */}
+        <Tooltip label={`Switch to ${switchTo} mode`}>
+          <button
+            type="button"
+            className="topbar__logo"
+            aria-label={`Switch to ${switchTo} mode`}
+            onClick={() => setTheme(switchTo)}
+          >
+            <Logo />
+          </button>
+        </Tooltip>
         <input
           className="topbar__name"
           value={draftName}

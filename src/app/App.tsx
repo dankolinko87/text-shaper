@@ -12,11 +12,14 @@ import { DEFAULT_FONT_ID } from '../fonts/manifest'
 import { restoreAutosave, startAutosave } from '../state/autosave'
 import { useDocumentStore } from '../state/documentStore'
 import { useUiStore } from '../state/uiStore'
+import { forgetTokens } from '../editor/colours'
+import { applyTheme, writeTheme } from '../state/theme'
 import { loadFont } from '../typography/fontRegistry'
 import './app.css'
 
 export function App() {
   const fontLoaded = useUiStore((s) => s.fontLoaded)
+  const theme = useUiStore((s) => s.theme)
   const clipperReady = useUiStore((s) => s.clipperReady)
   const [loadError, setLoadError] = useState<string | null>(null)
 
@@ -35,6 +38,19 @@ export function App() {
    */
   const storeWarnings = useDocumentStore((s) => s.warnings)
   const warnings = { ...fitWarnings, ...storeWarnings }
+
+  /*
+   * The palette: on the document, kept, and forgotten by the canvas.
+   *
+   * The canvas caches the tokens it reads, because Fabric wants strings; a
+   * change of palette makes that cache stale, so it is emptied here and the
+   * next read asks the stylesheet again.
+   */
+  useEffect(() => {
+    applyTheme(theme)
+    forgetTokens()
+    writeTheme(window.localStorage, theme)
+  }, [theme])
 
   /* Boot the two async engines. Both must be ready before text can be fitted. */
   useEffect(() => {

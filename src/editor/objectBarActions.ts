@@ -102,3 +102,31 @@ export function spreadBounds(object: FrameObject): Rect {
   const last = object.states.length - 1
   return { ...box, width: box.width + windowOffset(object, last) / (object.transform.scaleX || 1) }
 }
+
+/** How far the plate stands off the frame at the sides and bottom, as a share of its width. */
+const PLATE_PAD = 0.06
+/** Screen pixels the spread's number chips need above each window. */
+const CHIP_ROOM = 28
+
+/**
+ * The plate behind a held frame, in the frame's own units: the frame (or the
+ * whole spread row) with padding round it. Defined once, because the plate is
+ * drawn from it AND the bar hangs from it — a bar that hung from the frame's
+ * edge sat on the plate's bottom strip.
+ *
+ * Spread, the chips ride above each window at screen size, so the top edge
+ * makes room for them at whatever the zoom is; collapsed there are no chips
+ * and the padding is even.
+ */
+export function plateBounds(object: FrameObject, spread: boolean, zoom: number): Rect {
+  const box = spread ? spreadBounds(object) : object.localBounds
+  const pad = object.localBounds.width * PLATE_PAD
+  const scaleY = object.transform.scaleY || 1
+  const padTop = spread ? Math.max(pad, CHIP_ROOM / ((zoom || 1) * scaleY)) : pad
+  return {
+    x: box.x - pad,
+    y: box.y - padTop,
+    width: box.width + pad * 2,
+    height: box.height + pad + padTop,
+  }
+}

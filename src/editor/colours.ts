@@ -11,6 +11,11 @@
  */
 const resolved = new Map<string, string>()
 
+/** Empty the cache — after a change of palette, so the next read is the new one. */
+export function forgetTokens(): void {
+  resolved.clear()
+}
+
 export function token(name: string, fallback: string): string {
   const seen = resolved.get(name)
   if (seen !== undefined) return seen

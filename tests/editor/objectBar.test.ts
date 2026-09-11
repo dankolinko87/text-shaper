@@ -1,7 +1,15 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 
 import { valuesFor } from '../../src/frame/frame'
-import { addState, moves, playing, spreadBounds, togglePlay, toggleSpread } from '../../src/editor/objectBarActions'
+import {
+  addState,
+  moves,
+  plateBounds,
+  playing,
+  spreadBounds,
+  togglePlay,
+  toggleSpread,
+} from '../../src/editor/objectBarActions'
 import { useDocumentStore } from '../../src/state/documentStore'
 import { useUiStore } from '../../src/state/uiStore'
 import type { FrameObject } from '../../src/types/document'
@@ -135,5 +143,32 @@ describe('the spread', () => {
       one.width,
       6,
     )
+  })
+})
+
+describe('the plate behind a held frame', () => {
+  it('pads a collapsed frame evenly, with no room on top for chips it does not have', () => {
+    const object = frameIn()
+    const plate = plateBounds(object, false, 1)
+    const box = object.localBounds
+    const side = box.x - plate.x
+    expect(side).toBeGreaterThan(0)
+    expect(plate.width - box.width, 'the same on both sides').toBeCloseTo(side * 2, 6)
+    expect(box.y - plate.y, 'and on top').toBeCloseTo(side, 6)
+    expect(plate.height - box.height, 'and below').toBeCloseTo(side * 2, 6)
+  })
+
+  it('makes screen-sized room for the number chips above a spread row', () => {
+    const object = frameIn()
+    const row = spreadBounds(object)
+    const wide = plateBounds(object, true, 1)
+    const side = row.x - wide.x
+    expect(wide.width - row.width).toBeCloseTo(side * 2, 6)
+    expect(row.y - wide.y, 'at least the side padding').toBeGreaterThanOrEqual(side)
+
+    // Zoomed out, the chips are the same size on screen, so they need more of
+    // the frame's own units above the row.
+    const far = plateBounds(object, true, 0.25)
+    expect(row.y - far.y).toBeGreaterThan(row.y - wide.y)
   })
 })

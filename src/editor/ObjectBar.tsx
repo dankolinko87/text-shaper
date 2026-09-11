@@ -10,7 +10,7 @@ import { MOSAIC_MAX_STATES, MOSAIC_MIN_STATES } from '../types/mosaic'
 import { useCanvasAnchor } from './canvasAnchor'
 import { showFrameState } from './frameStates'
 import { changeMosaicStateCount, showMosaicState } from './mosaicStates'
-import { addState, moves, playing, spreadBounds, togglePlay, toggleSpread } from './objectBarActions'
+import { addState, moves, plateBounds, playing, togglePlay, toggleSpread } from './objectBarActions'
 import { useSelectedObject } from './selection'
 import './canvas.css'
 
@@ -45,10 +45,12 @@ export function ObjectBar({
   const shown = useUiStore((s) => (id ? (s.mosaicStates[id] ?? 0) : 0))
   const spread = useUiStore((s) => (id ? s.spreadFrame === id : false))
   const running = useUiStore((s) => (object ? playing(object, s) : false))
-  // Spread, the bar hangs from the whole row rather than from the first window.
+  const zoom = useUiStore((s) => s.zoom)
+  // A frame's bar hangs from its PLATE — the whole row while spread — so it
+  // clears the grey rather than sitting on its bottom strip.
   const bounds = useMemo(
-    () => (object?.kind === 'frame' && spread ? spreadBounds(object) : undefined),
-    [object, spread],
+    () => (object?.kind === 'frame' ? plateBounds(object, spread, zoom) : undefined),
+    [object, spread, zoom],
   )
   const at = useCanvasAnchor(canvas, object, bounds)
 
