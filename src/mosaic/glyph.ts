@@ -125,13 +125,12 @@ function outlineAt(
   char: string,
   drawAt: number,
 ): PathData | null {
-  if (!(drawAt > 0) || !Number.isFinite(drawAt)) return null
+  const commands = glyphCommands(font, char, drawAt)
+  if (!commands) return null
 
+  const n = (v: number): string => Number(v.toFixed(PLACES)).toString()
   const out: string[] = []
-  const n = (v: number | undefined): string | null =>
-    v !== undefined && Number.isFinite(v) ? Number(v.toFixed(PLACES)).toString() : null
-
-  for (const command of font.getPath(char, 0, 0, drawAt).commands) {
+  for (const command of commands) {
     const parts =
       command.type === 'Z'
         ? []
@@ -140,13 +139,61 @@ function outlineAt(
           : command.type === 'Q'
             ? [command.x1, command.y1, command.x, command.y]
             : [command.x, command.y]
-
-    const written = parts.map(n)
-    if (written.some((value) => value === null)) return null
-    out.push(command.type + written.join(' '))
+    out.push(command.type + parts.map(n).join(' '))
   }
 
   return out.length > 0 ? out.join('') : null
+}
+
+/** One of opentype's commands, with every coordinate known to be a number. */
+export type GlyphCommand =
+  | { type: 'M' | 'L'; x: number; y: number }
+  | { type: 'Q'; x1: number; y1: number; x: number; y: number }
+  | { type: 'C'; x1: number; y1: number; x2: number; y2: number; x: number; y: number }
+  | { type: 'Z' }
+
+/**
+ * A glyph's commands at a draw size, checked finite — the one walk over
+ * opentype's output, shared by the mosaic's string outline and the mesh's
+ * numeric one. Null when a coordinate really is not a number, which would
+ * mean broken font data rather than a broken serialiser.
+ */
+export function glyphCommands(
+  font: NonNullable<ReturnType<typeof getLoadedFont>>,
+  char: string,
+  drawAt: number,
+): GlyphCommand[] | null {
+  if (!(drawAt > 0) || !Number.isFinite(drawAt)) return null
+  const out: GlyphCommand[] = []
+  const finite = (...values: (number | undefined)[]): boolean =>
+    values.every((v) => v !== undefined && Number.isFinite(v))
+
+  for (const command of font.getPath(char, 0, 0, drawAt).commands) {
+    // opentype types every coordinate as optional; `finite` is the check that
+    // they are there and are numbers, and the casts below say so.
+    const { x1, y1, x2, y2, x, y } = command as unknown as Record<string, number | undefined>
+    if (command.type === 'Z') {
+      out.push({ type: 'Z' })
+    } else if (command.type === 'C') {
+      if (!finite(x1, y1, x2, y2, x, y)) return null
+      out.push({
+        type: 'C',
+        x1: x1 as number,
+        y1: y1 as number,
+        x2: x2 as number,
+        y2: y2 as number,
+        x: x as number,
+        y: y as number,
+      })
+    } else if (command.type === 'Q') {
+      if (!finite(x1, y1, x, y)) return null
+      out.push({ type: 'Q', x1: x1 as number, y1: y1 as number, x: x as number, y: y as number })
+    } else {
+      if (!finite(x, y)) return null
+      out.push({ type: command.type, x: x as number, y: y as number })
+    }
+  }
+  return out
 }
 
 /**

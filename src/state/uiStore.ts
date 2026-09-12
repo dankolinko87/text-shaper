@@ -5,7 +5,7 @@ import { MAX_ZOOM, MIN_ZOOM } from '../geometry/viewportMath'
 import { clamp } from '../utils/math'
 import type { DocumentObject } from '../types/document'
 
-export type ToolId = 'select' | 'draw' | 'line' | 'pen' | 'mosaic' | 'frame' | 'pan' | 'grid'
+export type ToolId = 'select' | 'draw' | 'line' | 'pen' | 'mosaic' | 'mesh' | 'frame' | 'pan' | 'grid'
 
 /**
  * Which tab of the right-hand panel is showing.

@@ -15,8 +15,7 @@ import { activeState, mosaicChars, mosaicSpacing, mosaicTiles, tileAt } from '..
 import { isTypedCharacter } from '../mosaic/graphemes'
 import { readingOrder, stepThrough, tileInDirection } from '../mosaic/order'
 import { mosaicMoves } from './animationPlayback'
-import { liveTransform } from './renderer'
-import { shownWindow, windowTransform } from './stated'
+import { shownTransform } from './stated'
 import {
   backspaceCharacter,
   deleteCharacter,
@@ -33,6 +32,7 @@ import { useUiStore } from '../state/uiStore'
 import type { LetterMosaicObject, Vec2 } from '../types/document'
 import type { MosaicTile } from '../types/mosaic'
 import { selectionColour } from './colours'
+import { resizeCursorFor } from './cursors'
 
 /*
  * Selection blue, from the stylesheet — see `colours.ts`. A function rather than
@@ -123,8 +123,7 @@ const pointOnEdge = (edge: MosaicEdge, along: number): Vec2 =>
  * disagree about which window the furniture is in.
  */
 function where(canvas: FabricCanvas, object: LetterMosaicObject) {
-  const live = { ...object, transform: liveTransform(canvas, object.id, object.transform) }
-  return windowTransform(live, shownWindow(object, useUiStore.getState()))
+  return shownTransform(canvas, object)
 }
 
 /**
@@ -139,12 +138,7 @@ function cursorFor(edge: MosaicEdge, object: LetterMosaicObject): string {
     edge.axis === 'x'
       ? vectorObjectToArtboard(object.transform, { x: 1, y: 0 })
       : vectorObjectToArtboard(object.transform, { x: 0, y: 1 })
-  // Folded into a half turn: a drag axis has an orientation, not a direction.
-  const degrees = ((Math.atan2(axis.y, axis.x) * 180) / Math.PI + 180) % 180
-  if (degrees < 22.5 || degrees >= 157.5) return 'ew-resize'
-  if (degrees < 67.5) return 'nwse-resize'
-  if (degrees < 112.5) return 'ns-resize'
-  return 'nesw-resize'
+  return resizeCursorFor(axis)
 }
 
 interface MosaicLayerProps {

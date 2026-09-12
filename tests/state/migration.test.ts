@@ -1734,3 +1734,70 @@ function gradientDocument(textTo: string): string {
     },
   })
 }
+
+describe('v31: a mesh', () => {
+  it('round-trips through the file, nodes and lines intact', () => {
+    useDocumentStore.setState({
+      doc: { ...useDocumentStore.getState().doc, objects: {}, objectOrder: [] },
+      past: [],
+      future: [],
+      selection: [],
+    })
+    const store = useDocumentStore.getState()
+    const id = store.createMesh({ columns: 2, rows: 1, artboardCenter: { x: 10, y: 20 }, text: 'AB' })
+    const corner = useDocumentStore.getState().doc.objects[id]!
+    if (corner.kind !== 'mesh') throw new Error('expected a mesh')
+    const node = corner.nodes[0]!.id
+    store.setMeshNodes(id, 1, [{ id: node, at: { x: -150, y: -90 } }])
+    store.setMeshLines(id, 0, { colour: '#ff0000', width: 3, dash: null })
+    const before = useDocumentStore.getState().doc.objects[id]
+
+    const result = deserializeDocument(serializeDocument(useDocumentStore.getState().doc))
+    expect(result.doc?.schemaVersion).toBe(DOCUMENT_SCHEMA_VERSION)
+    expect(result.doc?.objects[id]).toEqual(before)
+  })
+
+  it('repairs a stripped mesh: every state names every node, and a mesh inside a frame too', () => {
+    const doc = createEmptyDocument()
+    const raw = JSON.parse(serializeDocument(doc)) as Record<string, unknown>
+    const bare = {
+      id: 'm',
+      kind: 'mesh',
+      name: 'Mesh',
+      transform: { x: 0, y: 0, scaleX: 1, scaleY: 1, rotation: 0, flipX: false, flipY: false },
+      localBounds: { x: -50, y: -50, width: 100, height: 100 },
+      nodes: [{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd' }],
+      tiles: [{ id: 't', ring: ['a', 'b', 'c', 'd'], corners: ['a', 'b', 'c', 'd'] }],
+      states: [
+        { id: 's1', nodes: { a: { x: -50, y: -50 }, b: { x: 50, y: -50 }, c: { x: 50, y: 50 }, d: { x: -50, y: 50 } } },
+        { id: 's2', nodes: { a: { x: -60, y: -60 } } },
+      ],
+    }
+    raw['objects'] = {
+      m: bare,
+      f: {
+        id: 'f',
+        kind: 'frame',
+        name: 'Frame',
+        transform: { x: 0, y: 0, scaleX: 1, scaleY: 1, rotation: 0, flipX: false, flipY: false },
+        localBounds: { x: 0, y: 0, width: 400, height: 300 },
+        members: [{ object: { ...bare, id: 'inner' } }],
+        states: [],
+      },
+    }
+    raw['objectOrder'] = ['m', 'f']
+    const result = deserializeDocument(JSON.stringify(raw))
+    const mesh = result.doc?.objects['m']
+    expect(mesh?.kind).toBe('mesh')
+    if (mesh?.kind !== 'mesh') return
+    expect(mesh.states[1]!.nodes['b'], 'taken from the first state that has it').toEqual({ x: 50, y: -50 })
+    expect(mesh.states[1]!.nodes['a'], 'its own position kept').toEqual({ x: -60, y: -60 })
+    expect(mesh.states[0]!.lines).toBeNull()
+    expect(mesh.states[0]!.chars).toEqual({})
+    expect(typeof mesh.snapStep).toBe('number')
+    expect(mesh.seed).toBeTruthy()
+    const frame = result.doc?.objects['f']
+    const inner = frame?.kind === 'frame' ? frame.members[0]?.object : undefined
+    expect(inner?.kind === 'mesh' && inner.states[1]!.nodes['c']).toEqual({ x: 50, y: 50 })
+  })
+})

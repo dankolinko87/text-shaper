@@ -175,7 +175,7 @@ export function useShortcuts(): void {
          */
         const sole = doc.selection.length === 1 ? doc.doc.objects[doc.selection[0] as string] : undefined
         // Tile-editing mode: one mosaic, and the caret is INSIDE it.
-        if (sole && sole.kind === 'mosaic' && ui.typing?.object === sole.id) {
+        if (sole && (sole.kind === 'mosaic' || sole.kind === 'mesh') && ui.typing?.object === sole.id) {
           ui.setMosaicSelection(sole.tiles.map((tile) => tile.id))
           return
         }
@@ -219,6 +219,12 @@ export function useShortcuts(): void {
         case 'M':
           e.preventDefault()
           ui.setTool('mosaic')
+          break
+
+        case 'n':
+        case 'N':
+          e.preventDefault()
+          ui.setTool('mesh')
           break
 
         case 'f':

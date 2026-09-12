@@ -130,3 +130,65 @@ export function backspaceCharacter(
   if (!previous || previous === focus) return { chars: { ...chars }, focus }
   return { chars: setCharacter(chars, previous, null), focus: previous }
 }
+
+/* ------------------------------------------------------------- words */
+
+/*
+ * A cell that holds a WORD rather than a letter — the mesh's cells.
+ *
+ * The rules above are a letter-per-tile keyboard: a keystroke fills the tile
+ * and moves on, because there is nothing more to put in it. A mesh cell is
+ * poured with whatever string it holds, so typing APPENDS and the caret stays
+ * where it is; moving on is a deliberate act — Space or Return — and Backspace
+ * takes back one letter at a time before it steps back a cell. The same
+ * letters-by-tile-id, the same "absent is empty".
+ */
+
+/** Add a character to the end of what the focused cell holds, and stay. */
+export function appendCharacter(chars: MosaicChars, focus: string, char: string): Typed {
+  return { chars: setCharacter(chars, focus, (chars[focus] ?? '') + char), focus }
+}
+
+/**
+ * Backspace in a word cell: take the last letter off, or, from an empty cell,
+ * step back to the cell before — leaving what it holds, so that holding the
+ * key walks back across the cells without eating a word by surprise.
+ */
+export function backspaceLetter(chars: MosaicChars, order: readonly string[], focus: string): Typed {
+  const held = graphemes(chars[focus] ?? '')
+  if (held.length > 0) {
+    return { chars: setCharacter(chars, focus, held.slice(0, -1).join('')), focus }
+  }
+  const previous = stepThrough(order, focus, -1)
+  return { chars: { ...chars }, focus: previous ?? focus }
+}
+
+/**
+ * Paste into word cells: one word per cell from the caret onward, split on
+ * whitespace, the first word joining whatever the caret's cell already holds.
+ * What will not fit is dropped and counted, as `pasteCharacters` does.
+ */
+export function pasteWords(
+  chars: MosaicChars,
+  order: readonly string[],
+  focus: string,
+  text: string,
+): Pasted {
+  const words = text.split(/\s+/).filter((word) => word.length > 0)
+  const start = order.indexOf(focus)
+  if (start === -1 || words.length === 0) return { chars: { ...chars }, focus, dropped: 0 }
+
+  const room = order.length - start
+  const placed = Math.min(room, words.length)
+  let next = { ...chars }
+  for (let i = 0; i < placed; i++) {
+    const cell = order[start + i] as string
+    const before = i === 0 ? (next[cell] ?? '') : ''
+    next = setCharacter(next, cell, before + (words[i] as string))
+  }
+  return {
+    chars: next,
+    focus: order[Math.min(order.length - 1, start + placed - 1)] ?? focus,
+    dropped: words.length - placed,
+  }
+}

@@ -2,10 +2,11 @@ import { useCallback, useRef, useState } from 'react'
 
 import { Icon } from '../components/Icon'
 import { useDismiss } from '../components/useDismiss'
-import { activeState, allTiles, mosaicChars } from '../mosaic/tiles'
+import { allMeshTiles } from '../mesh/layout'
+import { allTiles } from '../mosaic/tiles'
 import { useDocumentStore } from '../state/documentStore'
 import { useUiStore } from '../state/uiStore'
-import type { LetterMosaicObject } from '../types/document'
+import type { Tiled } from '../types/document'
 import { DEFAULT_GLYPH_COLOUR } from '../types/mosaic'
 import './panels.css'
 
@@ -27,7 +28,7 @@ import './panels.css'
  * Empty selection means every tile — see `colourTargets` — so the trigger says
  * "All tiles" rather than "None", and the All entry simply empties it.
  */
-export function TilePicker({ object, at }: { object: LetterMosaicObject; at: number }) {
+export function TilePicker({ object, at }: { object: Tiled; at: number }) {
   const selection = useUiStore((s) => s.mosaicSelection)
   const page = useDocumentStore((s) => s.doc.artboard.background)
   const [open, setOpen] = useState(false)
@@ -36,9 +37,9 @@ export function TilePicker({ object, at }: { object: LetterMosaicObject; at: num
   const close = useCallback(() => setOpen(false), [])
   useDismiss(open, close, wrapRef)
 
-  const every = allTiles(object, at)
-  const state = activeState(object, at)
-  const chars = mosaicChars(object, at)
+  const every = object.kind === 'mesh' ? allMeshTiles(object, at) : allTiles(object, at)
+  const state = object.states[Math.min(Math.max(0, at), object.states.length - 1)]
+  const chars = state?.chars ?? {}
   const chosen = new Set(selection)
 
   /*

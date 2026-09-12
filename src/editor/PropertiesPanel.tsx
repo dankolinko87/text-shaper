@@ -12,6 +12,7 @@ import {
 import { FramePanel } from "./FramePanel";
 import { ColourChip, Section, StrokeChip } from "./Section";
 import { MosaicStatePanel } from "./StateList";
+import { MeshStatePanel } from "./MeshPanel";
 import {
   Button,
   ColorField,
@@ -176,6 +177,22 @@ export function PropertiesPanel({ warnings, autoSizes, lineCounts }: PropertiesP
 
         <div className="panel__scroll">
           <MosaicStatePanel object={object} at={at} />
+        </div>
+      </aside>
+    );
+  }
+
+  // A mesh: the mosaic's panel, on polygons.
+  if (object.kind === "mesh") {
+    const at = Math.min(shownIndex, object.states.length - 1);
+    return (
+      <aside className="panel panel--properties" aria-label="Properties">
+        <header className="panel__header">
+          <h2 className="panel__title">State {at + 1}</h2>
+        </header>
+
+        <div className="panel__scroll">
+          <MeshStatePanel object={object} at={at} />
         </div>
       </aside>
     );

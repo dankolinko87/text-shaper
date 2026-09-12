@@ -72,9 +72,14 @@ const makeFrame = (): string => {
   return id
 }
 
+/** A mesh is born with three states, like the mosaic it grew out of. */
+const makeMesh = (): string =>
+  store().createMesh({ columns: 2, rows: 2, artboardCenter: { x: 300, y: 200 }, text: 'ABCD' })
+
 describe.each([
   ['mosaic', makeMosaic],
   ['frame', makeFrame],
+  ['mesh', makeMesh],
 ])('an object with states: the %s', (kindName, make) => {
   let id: string
   const object = (): Stated => {
@@ -118,6 +123,19 @@ describe.each([
     while (object().states.length < kindOf(object()).max) duplicateStateAt(object(), 0)
     expect(object().states).toHaveLength(12)
     expect(duplicateStateAt(object(), 0)).toBe(false)
+  })
+
+  it('takes one backdrop for every state at once, and clears it from every state', () => {
+    store().setStatedBackground(id, '#ff8800ff')
+    expect(object().states.map((state) => state.background ?? null)).toEqual(
+      object().states.map(() => '#ff8800ff'),
+    )
+    // Writing the same colour again is not a change.
+    const before = store().doc
+    store().setStatedBackground(id, '#ff8800ff')
+    expect(store().doc).toBe(before)
+    store().setStatedBackground(id, null)
+    expect(object().states.every((state) => (state.background ?? null) === null)).toBe(true)
   })
 
   it('deletes a state and lands on the nearest survivor, down to the floor', () => {

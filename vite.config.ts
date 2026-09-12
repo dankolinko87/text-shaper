@@ -4,10 +4,12 @@ import { fileURLToPath } from 'node:url'
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 
+import { fileAutosave } from './vite/fileAutosave.js'
+
 const src = fileURLToPath(new URL('./src', import.meta.url))
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), fileAutosave()],
   resolve: {
     alias: { '@': src },
   },

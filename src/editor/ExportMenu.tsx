@@ -5,6 +5,7 @@ import { Icon } from '../components/Icon'
 import { useDismiss } from '../components/useDismiss'
 import { exportGif, type GifBackground } from '../export/gif'
 import { exportMosaicGif, type MosaicGifBackground } from '../export/mosaicGif'
+import { exportMeshGif, type MeshGifBackground } from '../export/meshGif'
 import { useDocumentStore } from '../state/documentStore'
 import './panels.css'
 
@@ -59,7 +60,16 @@ export function ExportMenu() {
     setBusy(true)
     setError(null)
     try {
-      if (target.kind === 'mosaic') {
+      if (target.kind === 'mesh') {
+        await exportMeshGif({
+          object: target,
+          size,
+          frames,
+          background: background as MeshGifBackground,
+          name: target.name,
+          artboard,
+        })
+      } else if (target.kind === 'mosaic') {
         await exportMosaicGif({
           object: target,
           size,

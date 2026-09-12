@@ -1,8 +1,12 @@
 import type { ComponentType } from 'react'
 
-import type { FrameObject, LetterMosaicObject, Stated } from '../types/document'
+import { useDocumentStore } from '../state/documentStore'
+import { useUiStore } from '../state/uiStore'
+import type { FrameObject, LetterMosaicObject, MeshObject, Stated } from '../types/document'
 import { FrameSettings, FrameStateActions } from './FramePanel'
 import { FrameThumbnail } from './FrameThumbnail'
+import { MeshSettings } from './MeshPanel'
+import { MeshThumbnail } from './MeshThumbnail'
 import { MosaicSettings } from './StateList'
 import { StateMenu } from './StateMenu'
 import { StateThumbnail } from './StateThumbnail'
@@ -25,10 +29,34 @@ export interface StatedUi<T extends Stated = Stated> {
   Actions: ComponentType<{ object: T; at: number }>
 }
 
+/** The mosaic's menu, plus the one thing only a mosaic offers: becoming a mesh. */
+function MosaicStateActions({ object, at }: { object: LetterMosaicObject; at: number }) {
+  return (
+    <StateMenu
+      object={object}
+      at={at}
+      extras={[
+        {
+          label: 'Convert to mesh',
+          onSelect: () => {
+            const store = useDocumentStore.getState()
+            const made = store.convertMosaicToMesh(object.id)
+            if (!made) return
+            store.commit('Convert to mesh')
+            const ui = useUiStore.getState()
+            ui.setTyping(null)
+            ui.setMosaicSelection([])
+          },
+        },
+      ]}
+    />
+  )
+}
+
 const MOSAIC: StatedUi<LetterMosaicObject> = {
   Settings: MosaicSettings,
   Thumbnail: StateThumbnail,
-  Actions: StateMenu,
+  Actions: MosaicStateActions,
 }
 
 const FRAME: StatedUi<FrameObject> = {
@@ -42,6 +70,12 @@ const FRAME: StatedUi<FrameObject> = {
  * take their own kind; dispatching on `kind` is what makes handing them the
  * object safe, which the cast says in the only way a component prop can.
  */
+const MESH: StatedUi<MeshObject> = {
+  Settings: MeshSettings,
+  Thumbnail: MeshThumbnail,
+  Actions: StateMenu,
+}
+
 export function uiOf(object: Stated): StatedUi {
-  return (object.kind === 'mosaic' ? MOSAIC : FRAME) as unknown as StatedUi
+  return (object.kind === 'mosaic' ? MOSAIC : object.kind === 'mesh' ? MESH : FRAME) as unknown as StatedUi
 }

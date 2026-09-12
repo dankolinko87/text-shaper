@@ -1,5 +1,26 @@
-import type { Rect } from '../types/document'
+import type { Rect, Vec2 } from '../types/document'
 import type { MosaicTileLayout } from '../types/mosaic'
+
+/**
+ * What the order needs of a tile: where it is and how big. A mosaic's layout
+ * answers with its structural rectangle; a mesh's carries a polygon's bounds
+ * and centroid. One order for both, because a caret should walk a mesh the
+ * way it walks a mosaic.
+ */
+export interface Placed {
+  bounds: Rect
+  centre: Vec2
+}
+
+type Layout = MosaicTileLayout | Placed
+
+const placed = (tile: Layout): Placed =>
+  'bounds' in tile
+    ? tile
+    : {
+        bounds: tile.structural,
+        centre: { x: centreX(tile.structural), y: centreY(tile.structural) },
+      }
 
 /**
  * The order a mosaic reads in.
@@ -31,24 +52,24 @@ export type ReadingDirection = 'ltr' | 'rtl'
 const ROW_TOLERANCE = 0.66
 
 export function readingOrder(
-  tiles: ReadonlyMap<string, MosaicTileLayout>,
+  tiles: ReadonlyMap<string, Layout>,
   direction: ReadingDirection = 'ltr',
 ): string[] {
-  const entries = [...tiles.entries()].map(([id, tile]) => ({ id, rect: tile.structural }))
+  const entries = [...tiles.entries()].map(([id, tile]) => ({ id, ...placed(tile) }))
   if (entries.length === 0) return []
 
   // Top to bottom first, so a row is built from tiles that have already been
   // seen to start at about the same height.
-  entries.sort((a, b) => centreY(a.rect) - centreY(b.rect) || a.rect.x - b.rect.x)
+  entries.sort((a, b) => a.centre.y - b.centre.y || a.bounds.x - b.bounds.x)
 
-  const rows: { id: string; rect: Rect }[][] = []
+  const rows: { id: string; bounds: Rect; centre: Vec2 }[][] = []
   for (const entry of entries) {
     const row = rows[rows.length - 1]
     const last = row?.[0]
     const together =
       last !== undefined &&
-      Math.abs(centreY(entry.rect) - centreY(last.rect)) <
-        Math.min(entry.rect.height, last.rect.height) * ROW_TOLERANCE
+      Math.abs(entry.centre.y - last.centre.y) <
+        Math.min(entry.bounds.height, last.bounds.height) * ROW_TOLERANCE
 
     if (together && row) row.push(entry)
     else rows.push([entry])
@@ -56,7 +77,7 @@ export function readingOrder(
 
   const across = direction === 'rtl' ? -1 : 1
   return rows.flatMap((row) =>
-    [...row].sort((a, b) => (a.rect.x - b.rect.x) * across).map((entry) => entry.id),
+    [...row].sort((a, b) => (a.bounds.x - b.bounds.x) * across).map((entry) => entry.id),
   )
 }
 
@@ -85,14 +106,15 @@ export function stepThrough(order: readonly string[], from: string, steps: numbe
  * closer but well off to one side".
  */
 export function tileInDirection(
-  tiles: ReadonlyMap<string, MosaicTileLayout>,
+  tiles: ReadonlyMap<string, Layout>,
   from: string,
   direction: 'up' | 'down' | 'left' | 'right',
 ): string | null {
-  const start = tiles.get(from)
-  if (!start) return null
+  const found = tiles.get(from)
+  if (!found) return null
+  const start = placed(found)
 
-  const origin = { x: centreX(start.structural), y: centreY(start.structural) }
+  const origin = start.centre
   const along = direction === 'left' || direction === 'right' ? 'x' : 'y'
   const sign = direction === 'right' || direction === 'down' ? 1 : -1
   /** Off to the side counts for more than distance ahead, so a row is preferred. */
@@ -101,12 +123,12 @@ export function tileInDirection(
   let best: string | null = null
   let bestScore = Infinity
 
-  for (const [id, tile] of tiles) {
+  for (const [id, each] of tiles) {
     if (id === from) continue
-    const centre = { x: centreX(tile.structural), y: centreY(tile.structural) }
+    const centre = placed(each).centre
     const ahead = (centre[along] - origin[along]) * sign
     // Half a tile, so a neighbour that only just clears the boundary counts.
-    if (ahead <= Math.min(start.structural.height, start.structural.width) * 0.1) continue
+    if (ahead <= Math.min(start.bounds.height, start.bounds.width) * 0.1) continue
 
     const aside = Math.abs(along === 'x' ? centre.y - origin.y : centre.x - origin.x)
     const score = ahead + aside * SIDEWAYS

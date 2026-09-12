@@ -5,6 +5,7 @@ import { useDocumentStore } from '../state/documentStore'
 import { useUiStore } from '../state/uiStore'
 import type { FrameObject } from '../types/document'
 import { Section } from './Section'
+import { StatedBackgroundField } from './StatedBackgroundField'
 import { StateMenu } from './StateMenu'
 import { StateTimingFields } from './StateTimingFields'
 import './panels.css'
@@ -74,6 +75,7 @@ export function FrameSettings({ object }: { object: FrameObject }) {
             onChange={(speed) => store().setFrameSpeed(object.id, speed)}
             onCommit={() => store().commit('Change speed')}
           />
+          <StatedBackgroundField object={object} />
         </Section>
       </div>
     </>

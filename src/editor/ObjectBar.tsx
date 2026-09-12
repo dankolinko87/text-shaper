@@ -4,7 +4,7 @@ import type { Canvas as FabricCanvas } from 'fabric'
 import { Tooltip } from '../components/controls'
 import { Icon } from '../components/Icon'
 import { useUiStore } from '../state/uiStore'
-import type { LetterMosaicObject } from '../types/document'
+import type { Tiled } from '../types/document'
 import { isStated } from '../types/document'
 import { useCanvasAnchor } from './canvasAnchor'
 import {
@@ -44,7 +44,7 @@ export function ObjectBar({
 }: {
   canvas: FabricCanvas | null
   /** The mosaic being typed into, which is the object even while nothing is selected. */
-  inside: LetterMosaicObject | undefined
+  inside: Tiled | undefined
 }) {
   const { selected } = useSelectedObject()
   const object = inside ?? selected

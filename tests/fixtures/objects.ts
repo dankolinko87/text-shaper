@@ -1,4 +1,9 @@
-import type { LetterMosaicObject, TextShaperDocument, TypographyObject } from '../../src/types/document'
+import type {
+  LetterMosaicObject,
+  MeshObject,
+  TextShaperDocument,
+  TypographyObject,
+} from '../../src/types/document'
 
 /**
  * Reaching into a document for an object of a known kind.
@@ -19,5 +24,12 @@ export function mosaicIn(doc: TextShaperDocument, id: string): LetterMosaicObjec
   const object = doc.objects[id]
   if (!object) throw new Error(`no object ${id}`)
   if (object.kind !== 'mosaic') throw new Error(`${id} is a ${object.kind}, not a mosaic`)
+  return object
+}
+
+export function meshIn(doc: TextShaperDocument, id: string): MeshObject {
+  const object = doc.objects[id]
+  if (!object) throw new Error(`no object ${id}`)
+  if (object.kind !== 'mesh') throw new Error(`${id} is a ${object.kind}, not a mesh`)
   return object
 }

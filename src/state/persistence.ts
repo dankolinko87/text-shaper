@@ -2,6 +2,7 @@ import { pathToOutline } from '../geometry/outline'
 import type { TextShaperDocument } from '../types/document'
 import { DOCUMENT_SCHEMA_VERSION } from '../types/document'
 import { MOSAIC_DEFAULT_SNAP } from '../mosaic/snap'
+import type { Vec2 } from '../types/document'
 import {
   MOSAIC_CELL,
   MOSAIC_DEFAULT_EASING,
@@ -244,6 +245,85 @@ function unfreezePatch(patch: Record<string, unknown>, own: Record<string, unkno
     for (const key of Object.keys(t)) if (same(t[key], own[key])) delete t[key]
     if (Object.keys(t).length === 0) delete patch['typeSettings']
   }
+}
+
+/**
+ * Every mesh in a raw document — top-level, or a member of a frame, which
+ * `forEachMosaic` never reached and which cost a mosaic in a frame every
+ * repair. A mesh member goes through the same completion as one on the page.
+ */
+function forEachMesh(raw: Record<string, unknown>, fn: (o: Record<string, unknown>) => void): void {
+  const objects = raw['objects']
+  if (!objects || typeof objects !== 'object') return
+  const visit = (value: unknown): void => {
+    if (!value || typeof value !== 'object') return
+    const object = value as Record<string, unknown>
+    if (object['kind'] === 'mesh') fn(object)
+    if (object['kind'] === 'frame' && Array.isArray(object['members'])) {
+      for (const member of object['members'] as unknown[]) {
+        if (member && typeof member === 'object') visit((member as Record<string, unknown>)['object'])
+      }
+    }
+  }
+  for (const value of Object.values(objects as Record<string, unknown>)) visit(value)
+}
+
+/**
+ * Everything a mesh must hold, filled in wherever it is missing — the mesh's
+ * `completeMosaic`, for the same reason: a version number is not proof of
+ * shape. Positions a state lacks are taken from the first state that has
+ * them, so every state names every node.
+ */
+function completeMesh(object: Record<string, unknown>): void {
+  if (typeof object['snapStep'] !== 'number') object['snapStep'] = MOSAIC_DEFAULT_SNAP
+  if (!Array.isArray(object['nodes'])) object['nodes'] = []
+  if (!Array.isArray(object['tiles'])) object['tiles'] = []
+  const nodeIds = (object['nodes'] as unknown[])
+    .map((node) => (node && typeof node === 'object' ? (node as Record<string, unknown>)['id'] : null))
+    .filter((id): id is string => typeof id === 'string')
+  const tileIds = new Set(
+    (object['tiles'] as unknown[])
+      .map((tile) => (tile && typeof tile === 'object' ? (tile as Record<string, unknown>)['id'] : null))
+      .filter((id): id is string => typeof id === 'string'),
+  )
+
+  const states = Array.isArray(object['states']) ? (object['states'] as unknown[]) : []
+  const usable = states.filter((each) => each && typeof each === 'object') as Record<string, unknown>[]
+  if (usable.length === 0) usable.push({ nodes: {}, glyphColour: {}, tileColour: {}, background: null })
+
+  usable.forEach((state, at) => {
+    completeState(state, at, tileIds)
+    delete state['x']
+    delete state['y']
+    if (typeof state['outerPadding'] !== 'number') state['outerPadding'] = 0
+    if (state['lines'] === undefined) state['lines'] = null
+    const nodes = state['nodes']
+    if (!nodes || typeof nodes !== 'object' || Array.isArray(nodes)) state['nodes'] = {}
+  })
+  // Every state names every node: a missing position is borrowed from the
+  // first state that has one, else the origin.
+  for (const id of nodeIds) {
+    const known = usable
+      .map((state) => (state['nodes'] as Record<string, unknown>)[id])
+      .find((p) => p && typeof p === 'object' && Number.isFinite((p as Vec2).x) && Number.isFinite((p as Vec2).y)) as
+      | Vec2
+      | undefined
+    for (const state of usable) {
+      const map = state['nodes'] as Record<string, unknown>
+      const p = map[id]
+      if (!p || typeof p !== 'object' || !Number.isFinite((p as Vec2).x) || !Number.isFinite((p as Vec2).y)) {
+        map[id] = known ? { x: known.x, y: known.y } : { x: 0, y: 0 }
+      }
+    }
+  }
+  object['states'] = usable
+
+  const seed = object['seed'] as Record<string, unknown> | undefined
+  if (!seed || typeof seed !== 'object' || typeof seed['columns'] !== 'number' || typeof seed['rows'] !== 'number') {
+    object['seed'] = { columns: 1, rows: 1 }
+  }
+  // A mesh saved before it had a choice followed its rim; it still does.
+  if (object['backdrop'] !== 'box' && object['backdrop'] !== 'silhouette') object['backdrop'] = 'silhouette'
 }
 
 /** Every mosaic in a raw document, whatever shape the rest of it is in. */
@@ -1375,6 +1455,7 @@ export function deserializeDocument(raw: string): DeserializeResult {
    */
   noteFallbackFont(data)
   forEachMosaic(data, completeMosaic)
+  forEachMesh(data, completeMesh)
   forEachFrame(data, completeFrame)
 
   const validation = validateDocument(data)

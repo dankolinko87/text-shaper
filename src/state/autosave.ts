@@ -1,9 +1,11 @@
 import { useDocumentStore } from './documentStore'
+import { putFileAutosave, restoreFileAutosave } from './fileAutosave'
 import {
   keepAutosaveAsPrevious,
   loadAutosave,
   loadPreviousAutosave,
   saveAutosave,
+  serializeDocument,
 } from './persistence'
 
 /**
@@ -85,7 +87,16 @@ export function restoreAutosave(): RestoreResult {
 
   // Told apart deliberately. "Nothing saved" is an ordinary first run; a snapshot
   // that exists and will not load is work at risk, and the caller must know.
-  if (current.error === 'Nothing autosaved.') return { kind: 'nothing' }
+  if (current.error === 'Nothing autosaved.') {
+    /*
+     * Nothing in THIS browser's storage — which is not the same as nothing
+     * saved. The preview pane in the desktop app opens a fresh profile every
+     * session, so the dev server keeps a copy as a file; it is asked now, and
+     * loads only into a session that is still empty when it answers.
+     */
+    void restoreFileAutosave()
+    return { kind: 'nothing' }
+  }
   return { kind: 'failed', error: current.error ?? 'The autosave could not be read.' }
 }
 
@@ -142,6 +153,8 @@ export function startAutosave(restored: RestoreResult): () => void {
       // working goes unnoticed until it is needed.
       console.warn('[autosave] could not write the document to local storage.')
     }
+    // And the copy that outlives this browser profile, while there is a server to keep it.
+    putFileAutosave(serializeDocument(state.doc))
   }
 
   const schedule = (): void => {

@@ -1,5 +1,8 @@
+import type { Canvas } from 'fabric'
+
 import type { Easing } from '../anim/easing'
 import { framePlaybackDuration } from '../frame/frame'
+import { meshPlaybackDuration } from '../mesh/timeline'
 import { pointArtboardToObject } from '../geometry/objectSpace'
 import { playbackDuration as mosaicPlaybackDuration } from '../mosaic/timeline'
 import { useDocumentStore } from '../state/documentStore'
@@ -9,6 +12,7 @@ import type {
   DocumentObject,
   FrameObject,
   LetterMosaicObject,
+  MeshObject,
   Rect,
   Stated,
   Transform2D,
@@ -17,8 +21,8 @@ import type {
 import { isStated, isTypography } from '../types/document'
 import { FRAME_MAX_STATES, FRAME_MIN_STATES } from '../types/frame'
 import { MOSAIC_MAX_STATES, MOSAIC_MIN_STATES } from '../types/mosaic'
-import { frameRuns, mosaicMoves } from './animationPlayback'
-import { windowOffset } from './renderer'
+import { frameRuns, meshMoves, mosaicMoves } from './animationPlayback'
+import { liveTransform, windowOffset } from './renderer'
 
 /**
  * Everything that is true of an object BECAUSE it has states, written once.
@@ -93,9 +97,28 @@ const FRAME: StatedKind<FrameObject> = {
   moves: frameRuns,
 }
 
+/**
+ * A mesh's states are written by the mosaic's actions — every field they
+ * touch is one the two kinds share — so its row is the mosaic's with its own
+ * word, clock and motion test.
+ */
+const MESH: StatedKind<MeshObject> = {
+  noun: 'mesh',
+  min: MOSAIC_MIN_STATES,
+  max: MOSAIC_MAX_STATES,
+  duplicate: (id, at) => store().duplicateMosaicState(id, at),
+  delete: (id, at) => store().deleteMosaicState(id, at),
+  move: (id, from, to) => store().moveMosaicState(id, from, to),
+  setCount: (id, count) => store().setMosaicStateCount(id, count),
+  setTiming: (id, at, patch) => store().setMosaicStateTiming(id, at, patch),
+  setEasing: (id, at, easing) => store().setMosaicEasing(id, at, easing),
+  playbackDuration: meshPlaybackDuration,
+  moves: meshMoves,
+}
+
 /** The one place the kinds are told apart. */
 export function kindOf(object: Stated): StatedKind {
-  return object.kind === 'mosaic' ? MOSAIC : FRAME
+  return object.kind === 'mosaic' ? MOSAIC : object.kind === 'mesh' ? MESH : FRAME
 }
 
 /** The object as the store has it NOW, not the one a render handed in. */
@@ -232,6 +255,18 @@ export function shownWindow(
 export function windowTransform(object: Stated, index: number): Transform2D {
   if (index === 0) return object.transform
   return { ...object.transform, x: object.transform.x + windowOffset(object, index) }
+}
+
+/**
+ * Where the shown state is DRAWN, in both directions: the object's LIVE
+ * transform — Fabric moves the group as the pointer moves and only writes the
+ * result back on release — stood along the row to the shown state's window
+ * while the object is spread. Every overlay maps through this, so none can
+ * disagree about which window the furniture is in.
+ */
+export function shownTransform(canvas: Canvas | null, object: Stated): Transform2D {
+  const live = { ...object, transform: liveTransform(canvas, object.id, object.transform) }
+  return windowTransform(live, shownWindow(object, useUiStore.getState()))
 }
 
 /**

@@ -138,11 +138,13 @@ export function useTextPaths(): {
       doc.objectOrder.flatMap((id) => {
         const object = doc.objects[id]
         if (!object) return []
-        if (object.kind === 'mosaic') return object.states.map((state) => state.font.fontId)
+        if (object.kind === 'mosaic' || object.kind === 'mesh') {
+          return object.states.map((state) => state.font.fontId)
+        }
         // A frame's fonts are whatever its members use, one level down.
         if (object.kind === 'frame') {
           return object.members.flatMap((member) =>
-            member.object.kind === 'mosaic'
+            member.object.kind === 'mosaic' || member.object.kind === 'mesh'
               ? member.object.states.map((state) => state.font.fontId)
               : member.object.kind === 'typography'
                 ? [member.object.font.fontId]

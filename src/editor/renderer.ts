@@ -37,6 +37,7 @@ import type {
   TypographyObject,
 } from '../types/document'
 import { isStated, opacityOf } from '../types/document'
+import { buildMeshGroup, meshContentKey } from './meshRender'
 import { selectionColour } from './colours'
 import { memberAtState, valuesFor } from '../frame/frame'
 import { mosaicClip, strokeChild, strokeRect } from './strokePaint'
@@ -365,7 +366,7 @@ function buildGroup(
 }
 
 /** Gather the children into a positioned group. */
-function finishGroup(
+export function finishGroup(
   object: DocumentObject,
   children: FabricObject[],
   centre: { x: number; y: number },
@@ -1412,14 +1413,18 @@ export function windowOffset(object: Stated, index: number): number {
 function buildWindow(object: Stated, at: number, input: SyncInput): Group {
   return object.kind === 'mosaic'
     ? buildMosaicGroup(object, at)
-    : buildFrameGroup(object, at, input)
+    : object.kind === 'mesh'
+      ? buildMeshGroup(object, at)
+      : buildFrameGroup(object, at, input)
 }
 
 /** What a window of a stated object at state `at` is drawn from, as one string. */
 function statedContentKey(object: Stated, at: number, input: SyncInput): string {
   return object.kind === 'mosaic'
     ? mosaicContentKey(object, at)
-    : frameContentKey(object, at, input)
+    : object.kind === 'mesh'
+      ? meshContentKey(object, at)
+      : frameContentKey(object, at, input)
 }
 
 /**

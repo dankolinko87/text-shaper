@@ -24,9 +24,10 @@ export const MIN_LINE_HEIGHT = 0.15
 export const MIN_FONT_SIZE = 4
 
 import type { FrameMember, FrameState } from './frame'
+import type { MeshNode, MeshState, MeshTile } from './mesh'
 import type { MosaicState, MosaicTile } from './mosaic'
 
-export const DOCUMENT_SCHEMA_VERSION = 30
+export const DOCUMENT_SCHEMA_VERSION = 31
 
 /**
  * SVG path `d` string, in absolute commands.
@@ -629,7 +630,35 @@ export interface FrameObject extends DocumentObjectBase {
   opacity: number
 }
 
-export type DocumentObject = TypographyObject | LetterMosaicObject | FrameObject
+/**
+ * Letters in the cells of a grid whose corners are free: nodes with a position
+ * per state, tiles as rings of them. See `types/mesh.ts` for the model, and
+ * for what it shares with the mosaic — everything that is not geometry.
+ */
+export interface MeshObject extends DocumentObjectBase {
+  kind: 'mesh'
+  /** Every node's identity. Shared by every state; positions are per state. */
+  nodes: MeshNode[]
+  /** The rings. Shared by every state, like a mosaic's tiles. */
+  tiles: MeshTile[]
+  /** The grid this mesh was seeded as, which is what Reset straightens back to. */
+  seed: { columns: number; rows: number }
+  states: MeshState[]
+  /** The grid a dragged node lands on, in object-local units. Zero drags freely. */
+  snapStep: number
+  /**
+   * What the backdrop, the silhouette clip and the border follow: the whole
+   * BOX round the state's nodes, as a mosaic's do, or the rim of the tiles.
+   */
+  backdrop: MeshBackdrop
+  loop: boolean
+  speed: number
+  opacity: number
+}
+
+export type MeshBackdrop = 'box' | 'silhouette'
+
+export type DocumentObject = TypographyObject | LetterMosaicObject | FrameObject | MeshObject
 
 /**
  * Narrowing helpers.
@@ -648,16 +677,29 @@ export const isMosaic = (object: DocumentObject): object is LetterMosaicObject =
 export const isFrame = (object: DocumentObject): object is FrameObject =>
   object.kind === 'frame'
 
+export const isMesh = (object: DocumentObject): object is MeshObject => object.kind === 'mesh'
+
+/**
+ * An object made of TILES that hold letters and colours per state: a mosaic
+ * or a mesh. The two differ in how a tile is placed and in nothing else, so
+ * the actions and panels that write letters, colours, backdrop, border, font,
+ * spacing, corners and timing serve both.
+ */
+export type Tiled = LetterMosaicObject | MeshObject
+
+export const isTiled = (object: DocumentObject): object is Tiled =>
+  object.kind === 'mosaic' || object.kind === 'mesh'
+
 /**
  * An object with STATES: a sequence of authored arrangements it plays
  * through, shows one of, and can lay out side by side. A mosaic and a frame
  * today; anything that joins them gets the same list, bar, chips, spread and
  * rules, because those are written once against this type.
  */
-export type Stated = LetterMosaicObject | FrameObject
+export type Stated = LetterMosaicObject | FrameObject | MeshObject
 
 export const isStated = (object: DocumentObject): object is Stated =>
-  object.kind === 'mosaic' || object.kind === 'frame'
+  object.kind === 'mosaic' || object.kind === 'frame' || object.kind === 'mesh'
 
 /**
  * How see-through an object is, whichever kind it is.

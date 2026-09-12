@@ -31,6 +31,7 @@ import {
 } from '../types/mosaic'
 import { GridSizeField } from './GridSizeField'
 import { Section, ColourChip, StrokeChip } from './Section'
+import { StatedBackgroundField } from './StatedBackgroundField'
 import { StateTimingFields } from './StateTimingFields'
 import { TilePicker } from './TilePicker'
 import './panels.css'
@@ -175,6 +176,7 @@ export function GridSection({ object }: { object: LetterMosaicObject }) {
           onChange={(step) => useDocumentStore.getState().setMosaicSnap(object.id, step)}
           onCommit={() => useDocumentStore.getState().commit('Change snap grid')}
         />
+        <StatedBackgroundField object={object} />
         {!fitsTheGrid ? (
           <>
             <div className="field">

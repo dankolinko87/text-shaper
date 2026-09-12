@@ -49,6 +49,8 @@ const VIEW_TOOLS: ToolDescriptor[] = [
  */
 const TOOLS: ToolDescriptor[] = [
   { id: 'mosaic', label: 'Letter mosaic', icon: 'mosaic', shortcut: 'M' },
+  // The mosaic's free-cornered cousin: letters in cells you can pull about.
+  { id: 'mesh', label: 'Mesh', icon: 'mesh', shortcut: 'N' },
   /*
    * A place with states, drawn before it has anything in it.
    *

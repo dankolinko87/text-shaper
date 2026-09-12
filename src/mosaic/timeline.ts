@@ -209,7 +209,7 @@ function blend(
 
 const mix = (a: number, b: number, t: number): number => a + (b - a) * t
 
-function blendColours(
+export function blendColours(
   from: Record<string, string | null>,
   to: Record<string, string | null>,
   t: number,
@@ -223,7 +223,7 @@ function blendColours(
 }
 
 /** Glyph colours have a default rather than a null, so they never disappear. */
-function blendGlyphColours(
+export function blendGlyphColours(
   from: Record<string, string>,
   to: Record<string, string>,
   t: number,

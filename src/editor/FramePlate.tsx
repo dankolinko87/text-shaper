@@ -3,7 +3,7 @@ import { useEffect } from 'react'
 
 import { pointObjectToArtboard } from '../geometry/objectSpace'
 import { useUiStore } from '../state/uiStore'
-import type { FrameObject, LetterMosaicObject } from '../types/document'
+import type { Stated } from '../types/document'
 import { token } from './colours'
 import { plateBounds } from './stated'
 import { liveTransform } from './renderer'
@@ -31,7 +31,7 @@ export function FramePlate({
   object,
 }: {
   canvas: FabricCanvas | null
-  object: FrameObject | LetterMosaicObject | undefined
+  object: Stated | undefined
 }) {
   const spread = useUiStore((s) => Boolean(object) && s.spread === object?.id)
 

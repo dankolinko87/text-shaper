@@ -17,6 +17,7 @@ import { FRAME_MAX_STATES, FRAME_MIN_STATES } from '../types/frame'
 import { sameStroke } from '../geometry/stroke'
 import { compose } from '../geometry/transform'
 import type {
+  MeshBackdrop,
   ColorValue,
   DocumentObject,
   FrameObject,
@@ -31,7 +32,30 @@ import type {
   TypographyObject,
   Vec2,
 } from '../types/document'
-import { isTypography } from '../types/document'
+import { isStated,
+  isTiled, isTypography } from '../types/document'
+import { thicknessFloor } from '../mesh/edit'
+import { allMeshTiles, meshSpacing } from '../mesh/layout'
+import { meshBounds, seedMesh } from '../mesh/mesh'
+import {
+  addPoint,
+  cutTile,
+  extrudeEdge,
+  latticeOf,
+  removePoint,
+  removeTile as removeTileFromMesh,
+  resetPositions,
+  type MeshShape,
+} from '../mesh/ops'
+import {
+  copyMeshIdentity,
+  copyMeshState,
+  initialMeshState,
+  meshFromMosaic,
+  sameMeshGeometry,
+} from '../mesh/dissection'
+import type { MeshState } from '../types/mesh'
+import { MESH_CELL, MESH_DEFAULT_STATES, MESH_MAX_SIDE } from '../types/mesh'
 import { createId, createSeed } from '../utils/id'
 
 /** How far a copy sits from what it was copied from, in artboard units. */
@@ -74,7 +98,7 @@ import {
   Y_MAX,
   Y_MIN,
 } from '../types/mosaic'
-import type { FontSettings } from '../types/document'
+import type { FontSettings, MeshObject, Stroke, Tiled } from '../types/document'
 import type { MosaicCorners, MosaicEasing, MosaicSpacing } from '../types/mosaic'
 import { MOSAIC_MAX_SIDE } from '../types/mosaic'
 import type { MosaicState, MosaicTile } from '../types/mosaic'
@@ -387,6 +411,8 @@ export interface DocumentState {
    * alone, the rule every other frame edit follows.
    */
   setFrameStateBackground: (id: string, index: number, background: ColorValue | null) => void
+  /** The backdrop of every state of any object with states, at once. */
+  setStatedBackground: (id: string, background: ColorValue | null) => void
   /** Move a state to another slot. False when nothing changed. */
   moveFrameState: (id: string, from: number, to: number) => boolean
   /**
@@ -555,6 +581,65 @@ export interface DocumentState {
   splitMosaicTile: (id: string, tile: string, axis: 'x' | 'y', stateIndex?: number) => string | null
   /** Returns the tile that took the space, for the caret to follow. */
   removeMosaicTile: (id: string, tile: string) => string | null
+  /* --- meshes --- */
+
+  /** A new mesh, seeded as a regular `columns × rows` grid of free corners. */
+  createMesh: (input: {
+    columns: number
+    rows: number
+    artboardCenter: { x: number; y: number }
+    text?: string
+  }) => string
+  /**
+   * Move nodes in one state. Carried forward through the states that are still
+   * copies, like a mosaic's lines; a write that moves nothing leaves no mark.
+   * The object's bounds follow, so a node can leave the box it was seeded in.
+   */
+  setMeshNodes: (
+    id: string,
+    stateIndex: number,
+    updates: readonly { id: string; at: { x: number; y: number } }[],
+  ) => void
+  /** The mesh's lines as artwork, per state, carried forward like its border. */
+  setMeshLines: (id: string, stateIndex: number, lines: Stroke | null) => void
+  /** What the backdrop, clip and border follow: the whole box, or the rim. */
+  setMeshBackdrop: (id: string, backdrop: MeshBackdrop) => void
+  /** Reseed as a fresh grid; letters and colours carry in reading order. */
+  resizeMeshGrid: (id: string, columns: number, rows: number) => boolean
+  /** Rebuild every state as the seed grid — the mesh's `rebuildMosaicGrid`. */
+  rebuildMeshGrid: (id: string) => boolean
+  /**
+   * One state's nodes back on the plain grid its tiles still form, the
+   * other states untouched and its copies following. False when the tiles
+   * no longer form a grid (a cut, an extrusion) — Rebuild is the way then.
+   */
+  resetMeshGrid: (id: string, stateIndex?: number) => boolean
+  /** A point on an edge, in every state at the same fraction. Returns its id. */
+  addMeshPoint: (id: string, edge: readonly [string, string], t: number) => string | null
+  /** A bend point taken out of every ring and every state. */
+  removeMeshPoint: (id: string, nodeId: string) => boolean
+  /** A tile in two along a line between two of its edges. Returns the new tile's id. */
+  cutMeshTile: (
+    id: string,
+    tileId: string,
+    entry: { edge: readonly [string, string]; t: number },
+    exit: { edge: readonly [string, string]; t: number },
+  ) => string | null
+  /** A new empty tile grown out of a rim edge by a drag read in the edited state. Returns its id. */
+  extrudeMeshEdge: (
+    id: string,
+    edge: readonly [string, string],
+    delta: { x: number; y: number },
+    stateIndex: number,
+  ) => string | null
+  /** Tiles gone, holes allowed; the last tile stays. */
+  removeMeshTiles: (id: string, tileIds: readonly string[]) => boolean
+  /**
+   * A mosaic becomes a mesh in its place: the same picture, every corner now a
+   * node. The mosaic is gone; undo brings it back. Returns the mesh's id.
+   */
+  convertMosaicToMesh: (id: string) => string | null
+
   /** A new letter mosaic, seeded as a regular `columns × rows` grid. */
   createMosaic: (input: {
     columns: number
@@ -640,16 +725,65 @@ export interface DocumentState {
  * and stops at the first that does not. Once a state differs it has been
  * authored, and neither it nor anything after it is anyone's to rewrite.
  */
-function followersOf(states: readonly MosaicState[], at: number): number[] {
+/** A mesh with new nodes and rings, in the document; its bounds follow. */
+function reshapeMesh(doc: TextShaperDocument, id: string, shape: MeshShape): TextShaperDocument {
+  const object = doc.objects[id]
+  if (!object || object.kind !== 'mesh') return doc
+  return {
+    ...doc,
+    objects: {
+      ...doc.objects,
+      [id]: {
+        ...object,
+        nodes: shape.nodes,
+        tiles: shape.tiles,
+        states: shape.states,
+        localBounds: meshBounds(shape.states),
+      },
+    },
+  }
+}
+
+function followersOf(object: Tiled, at: number): number[] {
+  const states = tiledStates(object)
   const source = states[at]
   if (!source) return []
   const out: number[] = []
   for (let next = at + 1; next < states.length; next++) {
     const candidate = states[next]
-    if (!candidate || !sameGeometry(candidate, source)) break
+    if (!candidate || !samePictureOf(object)(candidate, source)) break
     out.push(next)
   }
   return out
+}
+
+/** One state of a tiled object, whichever kind: the fields both kinds share are what the shared actions write. */
+type TiledState = MosaicState | MeshState
+
+/** The states as an array the shared actions can write into — a copy. */
+function tiledStates(object: Tiled): TiledState[] {
+  return [...(object.states as TiledState[])]
+}
+
+/**
+ * The object with new states. The one cast in the file: the shared actions
+ * write only fields both kinds have, so the states still match the object's
+ * kind, which the type system cannot see across the union.
+ */
+function withStates(object: Tiled, states: TiledState[]): Tiled {
+  return { ...object, states } as Tiled
+}
+
+/** "Do these two states look the same", for whichever kind the object is. */
+function samePictureOf(object: Tiled): (a: TiledState, b: TiledState) => boolean {
+  return object.kind === 'mesh'
+    ? (a, b) => sameMeshGeometry(a as MeshState, b as MeshState)
+    : (a, b) => sameGeometry(a as MosaicState, b as MosaicState)
+}
+
+/** A state copied for a new one, whichever kind. */
+function copyStateOf(object: Tiled, state: TiledState): TiledState {
+  return object.kind === 'mesh' ? copyMeshState(state as MeshState) : copyState(state as MosaicState)
 }
 
 /**
@@ -805,6 +939,15 @@ export const useDocumentStore = create<DocumentState>()((set, get) => {
                */
               ...copyMosaicIdentity(source.tiles, source.states),
             }
+          : source.kind === 'mesh'
+            ? {
+                ...source,
+                id: newId,
+                name,
+                transform: { ...source.transform, ...placed },
+                // Fresh node and tile ids, for the reason a mosaic's tiles get them.
+                ...copyMeshIdentity(source.nodes, source.tiles, source.states),
+              }
           : source.kind === 'frame'
             ? {
                 ...source,
@@ -850,9 +993,9 @@ export const useDocumentStore = create<DocumentState>()((set, get) => {
     if (leafIds.length === 0) return
     mutate((doc) => {
       const object = doc.objects[id]
-      if (!object || object.kind !== 'mosaic') return doc
+      if (!object || !isTiled(object)) return doc
       const at = object.states[stateIndex] ? stateIndex : 0
-      const state = object.states[at]
+      const state = tiledStates(object)[at]
       if (!state) return doc
 
       const known = new Set(object.tiles.map((tile) => tile.id))
@@ -885,14 +1028,14 @@ export const useDocumentStore = create<DocumentState>()((set, get) => {
         else next[leaf] = colour
       }
 
-      const states = [...object.states]
+      const states = tiledStates(object)
       // Carried forward through the states that are still copies of this one, the
       // same way geometry, spacing and font are.
-      for (const index of [at, ...followersOf(object.states, at)]) {
+      for (const index of [at, ...followersOf(object, at)]) {
         const each = states[index]
         if (each) states[index] = { ...each, [key]: { ...next } }
       }
-      return { ...doc, objects: { ...doc.objects, [id]: { ...object, states } } }
+      return { ...doc, objects: { ...doc.objects, [id]: withStates(object, states) } }
     })
   }
 
@@ -1190,7 +1333,37 @@ export const useDocumentStore = create<DocumentState>()((set, get) => {
     setMosaicSpacing(id, patch, stateIndex = 0) {
       mutate((doc) => {
         const existing = doc.objects[id]
-        if (!existing || existing.kind !== 'mosaic') return doc
+        if (!existing || !isTiled(existing)) return doc
+        if (existing.kind === 'mesh') {
+          /*
+           * A mesh has no content box to pad and no closed-form maxima: a tile
+           * that cannot take an inset collapses in the layout instead. So the
+           * two numbers are only floored at zero.
+           */
+          const at = existing.states[stateIndex] ? stateIndex : 0
+          const state = existing.states[at]
+          if (!state) return doc
+          const clean = (value: number | undefined, fallback: number): number =>
+            value === undefined || !Number.isFinite(value) ? fallback : Math.max(0, value)
+          const settled = {
+            gap: clean(patch.gap, state.gap),
+            glyphInset: clean(patch.glyphInset, state.glyphInset),
+            outerPadding: clean(patch.outerPadding, state.outerPadding),
+          }
+          if (
+            settled.gap === state.gap &&
+            settled.glyphInset === state.glyphInset &&
+            settled.outerPadding === state.outerPadding
+          ) {
+            return doc
+          }
+          const states = [...existing.states]
+          for (const index of [at, ...followersOf(existing, at)]) {
+            const each = states[index]
+            if (each) states[index] = { ...each, ...settled }
+          }
+          return { ...doc, objects: { ...doc.objects, [id]: { ...existing, states } } }
+        }
 
         const at = existing.states[stateIndex] ? stateIndex : 0
         const state = existing.states[at]
@@ -1265,7 +1438,7 @@ export const useDocumentStore = create<DocumentState>()((set, get) => {
         const states = [...existing.states]
         // The states after this one that are still copies of it come along, the
         // same way a geometry edit carries forward.
-        for (const index of [at, ...followersOf(existing.states, at)]) {
+        for (const index of [at, ...followersOf(existing, at)]) {
           const each = states[index]
           if (each) states[index] = { ...each, ...settled }
         }
@@ -1276,7 +1449,7 @@ export const useDocumentStore = create<DocumentState>()((set, get) => {
     setMosaicChars(id, stateIndex, chars) {
       mutate((doc) => {
         const object = doc.objects[id]
-        if (!object || object.kind !== 'mosaic') return doc
+        if (!object || !isTiled(object)) return doc
         const at = object.states[stateIndex] ? stateIndex : 0
         const state = object.states[at]
         if (!state) return doc
@@ -1294,7 +1467,7 @@ export const useDocumentStore = create<DocumentState>()((set, get) => {
           Object.entries(settled).every(([tile, char]) => state.chars[tile] === char)
         if (same) return doc
 
-        const states = [...object.states]
+        const states = tiledStates(object)
         /*
          * Carried forward through the states that are still copies of this one.
          *
@@ -1303,18 +1476,18 @@ export const useDocumentStore = create<DocumentState>()((set, get) => {
          * every state, and only a state somebody has actually authored keeps its
          * own letters.
          */
-        for (const index of [at, ...followersOf(object.states, at)]) {
+        for (const index of [at, ...followersOf(object, at)]) {
           const each = states[index]
           if (each) states[index] = { ...each, chars: { ...settled } }
         }
-        return { ...doc, objects: { ...doc.objects, [id]: { ...object, states } } }
+        return { ...doc, objects: { ...doc.objects, [id]: withStates(object, states) } }
       })
     },
 
     setMosaicCorners(id, patch, stateIndex = 0) {
       mutate((doc) => {
         const existing = doc.objects[id]
-        if (!existing || existing.kind !== 'mosaic') return doc
+        if (!existing || !isTiled(existing)) return doc
         const at = existing.states[stateIndex] ? stateIndex : 0
         const state = existing.states[at]
         if (!state) return doc
@@ -1335,21 +1508,21 @@ export const useDocumentStore = create<DocumentState>()((set, get) => {
           return doc
         }
 
-        const states = [...existing.states]
+        const states = tiledStates(existing)
         // Carried forward through the states that are still copies of this one,
         // exactly as spacing, font and geometry are.
-        for (const index of [at, ...followersOf(existing.states, at)]) {
+        for (const index of [at, ...followersOf(existing, at)]) {
           const each = states[index]
           if (each) states[index] = { ...each, ...settled }
         }
-        return { ...doc, objects: { ...doc.objects, [id]: { ...existing, states } } }
+        return { ...doc, objects: { ...doc.objects, [id]: withStates(existing, states) } }
       })
     },
 
     setMosaicFont(id, font, stateIndex = 0) {
       mutate((doc) => {
         const existing = doc.objects[id]
-        if (!existing || existing.kind !== 'mosaic') return doc
+        if (!existing || !isTiled(existing)) return doc
         const at = existing.states[stateIndex] ? stateIndex : 0
         const state = existing.states[at]
         if (!state) return doc
@@ -1360,12 +1533,12 @@ export const useDocumentStore = create<DocumentState>()((set, get) => {
         ) {
           return doc
         }
-        const states = [...existing.states]
-        for (const index of [at, ...followersOf(existing.states, at)]) {
+        const states = tiledStates(existing)
+        for (const index of [at, ...followersOf(existing, at)]) {
           const each = states[index]
           if (each) states[index] = { ...each, font: { ...font } }
         }
-        return { ...doc, objects: { ...doc.objects, [id]: { ...existing, states } } }
+        return { ...doc, objects: { ...doc.objects, [id]: withStates(existing, states) } }
       })
     },
 
@@ -1390,7 +1563,7 @@ export const useDocumentStore = create<DocumentState>()((set, get) => {
         const states = [...existing.states]
         // The states after this one that are still copies of it come along, so a
         // mosaic does not start moving the moment it is first touched.
-        for (const index of [at, ...followersOf(existing.states, at)]) {
+        for (const index of [at, ...followersOf(existing, at)]) {
           const each = states[index]
           if (each) states[index] = { ...each, [axis]: { ...next } }
         }
@@ -1401,7 +1574,7 @@ export const useDocumentStore = create<DocumentState>()((set, get) => {
     setMosaicSnap(id, step) {
       mutate((doc) => {
         const existing = doc.objects[id]
-        if (!existing || existing.kind !== 'mosaic') return doc
+        if (!existing || !isTiled(existing)) return doc
         const snapStep = Number.isFinite(step) ? Math.max(0, step) : 0
         if (existing.snapStep === snapStep) return doc
         return { ...doc, objects: { ...doc.objects, [id]: { ...existing, snapStep } } }
@@ -1451,7 +1624,7 @@ export const useDocumentStore = create<DocumentState>()((set, get) => {
 
     addMosaicState(id, after) {
       const existing = get().doc.objects[id]
-      if (!existing || existing.kind !== 'mosaic') return null
+      if (!existing || !isTiled(existing)) return null
       if (existing.states.length >= MOSAIC_MAX_STATES) return null
 
       const at = Math.min(Math.max(0, Math.floor(after)), existing.states.length - 1)
@@ -1460,10 +1633,10 @@ export const useDocumentStore = create<DocumentState>()((set, get) => {
 
       mutate((doc) => {
         const object = doc.objects[id]
-        if (!object || object.kind !== 'mosaic') return doc
-        const states = [...object.states]
-        states.splice(at + 1, 0, copyState(source))
-        return { ...doc, objects: { ...doc.objects, [id]: { ...object, states } } }
+        if (!object || !isTiled(object)) return doc
+        const states = tiledStates(object)
+        states.splice(at + 1, 0, copyStateOf(existing, source))
+        return { ...doc, objects: { ...doc.objects, [id]: withStates(object, states) } }
       })
       return at + 1
     },
@@ -1474,7 +1647,7 @@ export const useDocumentStore = create<DocumentState>()((set, get) => {
 
     deleteMosaicState(id, index) {
       const existing = get().doc.objects[id]
-      if (!existing || existing.kind !== 'mosaic') return null
+      if (!existing || !isTiled(existing)) return null
       // A timeline needs two ends. One state is a still picture, not an
       // animation, and there would be nothing for a transition to reach.
       if (existing.states.length <= MOSAIC_MIN_STATES) return null
@@ -1484,9 +1657,9 @@ export const useDocumentStore = create<DocumentState>()((set, get) => {
 
       mutate((doc) => {
         const object = doc.objects[id]
-        if (!object || object.kind !== 'mosaic') return doc
-        const states = object.states.filter((_, position) => position !== at)
-        return { ...doc, objects: { ...doc.objects, [id]: { ...object, states } } }
+        if (!object || !isTiled(object)) return doc
+        const states = tiledStates(object).filter((_, position) => position !== at)
+        return { ...doc, objects: { ...doc.objects, [id]: withStates(object, states) } }
       })
       // The nearest survivor: the one that slid into this slot, or the new last.
       return Math.min(at, existing.states.length - 2)
@@ -1494,7 +1667,7 @@ export const useDocumentStore = create<DocumentState>()((set, get) => {
 
     moveMosaicState(id, from, to) {
       const existing = get().doc.objects[id]
-      if (!existing || existing.kind !== 'mosaic') return false
+      if (!existing || !isTiled(existing)) return false
 
       const count = existing.states.length
       const at = Math.floor(from)
@@ -1505,26 +1678,26 @@ export const useDocumentStore = create<DocumentState>()((set, get) => {
 
       mutate((doc) => {
         const object = doc.objects[id]
-        if (!object || object.kind !== 'mosaic') return doc
-        const states = [...object.states]
+        if (!object || !isTiled(object)) return doc
+        const states = tiledStates(object)
         const [moved] = states.splice(at, 1)
         if (!moved) return doc
         states.splice(target, 0, moved)
-        return { ...doc, objects: { ...doc.objects, [id]: { ...object, states } } }
+        return { ...doc, objects: { ...doc.objects, [id]: withStates(object, states) } }
       })
       return true
     },
 
     setMosaicStateCount(id, count) {
       const existing = get().doc.objects[id]
-      if (!existing || existing.kind !== 'mosaic') return false
+      if (!existing || !isTiled(existing)) return false
       const wanted = Math.min(MOSAIC_MAX_STATES, Math.max(MOSAIC_MIN_STATES, Math.floor(count)))
       if (wanted === existing.states.length) return false
 
       mutate((doc) => {
         const object = doc.objects[id]
-        if (!object || object.kind !== 'mosaic') return doc
-        const states = [...object.states]
+        if (!object || !isTiled(object)) return doc
+        const states = tiledStates(object)
         /*
          * Growing appends, each new state copied from whatever is last AT THAT
          * MOMENT — so a run of new states continues the movement rather than all
@@ -1534,10 +1707,10 @@ export const useDocumentStore = create<DocumentState>()((set, get) => {
         while (states.length < wanted) {
           const last = states[states.length - 1]
           if (!last) break
-          states.push(copyState(last))
+          states.push(copyStateOf(object, last))
         }
         if (states.length > wanted) states.length = wanted
-        return { ...doc, objects: { ...doc.objects, [id]: { ...object, states } } }
+        return { ...doc, objects: { ...doc.objects, [id]: withStates(object, states) } }
       })
       return true
     },
@@ -1545,7 +1718,7 @@ export const useDocumentStore = create<DocumentState>()((set, get) => {
     setMosaicStateTiming(id, index, patch) {
       mutate((doc) => {
         const object = doc.objects[id]
-        if (!object || object.kind !== 'mosaic') return doc
+        if (!object || !isTiled(object)) return doc
         const at = Math.floor(index)
         const state = object.states[at]
         if (!state) return doc
@@ -1565,29 +1738,29 @@ export const useDocumentStore = create<DocumentState>()((set, get) => {
               )
 
         if (holdMs === state.holdMs && transitionMs === state.transitionMs) return doc
-        const states = [...object.states]
+        const states = tiledStates(object)
         states[at] = { ...state, holdMs, transitionMs }
-        return { ...doc, objects: { ...doc.objects, [id]: { ...object, states } } }
+        return { ...doc, objects: { ...doc.objects, [id]: withStates(object, states) } }
       })
     },
 
     setMosaicEasing(id, index, easing) {
       mutate((doc) => {
         const object = doc.objects[id]
-        if (!object || object.kind !== 'mosaic') return doc
+        if (!object || !isTiled(object)) return doc
         const at = Math.floor(index)
         const state = object.states[at]
         if (!state || state.easing === easing) return doc
-        const states = [...object.states]
+        const states = tiledStates(object)
         states[at] = { ...state, easing }
-        return { ...doc, objects: { ...doc.objects, [id]: { ...object, states } } }
+        return { ...doc, objects: { ...doc.objects, [id]: withStates(object, states) } }
       })
     },
 
     setMosaicSpeed(id, speed) {
       mutate((doc) => {
         const object = doc.objects[id]
-        if (!object || object.kind !== 'mosaic') return doc
+        if (!object || !isTiled(object)) return doc
         const next = Number.isFinite(speed) ? Math.min(8, Math.max(0.1, speed)) : 1
         if (object.speed === next) return doc
         // Speed is a rate, not a duration: it never rewrites a state's timing.
@@ -1606,7 +1779,7 @@ export const useDocumentStore = create<DocumentState>()((set, get) => {
     setMosaicBackground(id, stateIndex, colour) {
       mutate((doc) => {
         const object = doc.objects[id]
-        if (!object || object.kind !== 'mosaic') return doc
+        if (!object || !isTiled(object)) return doc
         const at = object.states[stateIndex] ? stateIndex : 0
         const state = object.states[at]
         if (!state) return doc
@@ -1615,35 +1788,35 @@ export const useDocumentStore = create<DocumentState>()((set, get) => {
         // undo entry — the same rule the tile colours follow.
         if ((state.background ?? null) === colour) return doc
 
-        const states = [...object.states]
+        const states = tiledStates(object)
         // Carried forward through the states that are still copies of this one,
         // the same way geometry, spacing, font and the tile colours are.
-        for (const index of [at, ...followersOf(object.states, at)]) {
+        for (const index of [at, ...followersOf(object, at)]) {
           const each = states[index]
           if (each) states[index] = { ...each, background: colour }
         }
-        return { ...doc, objects: { ...doc.objects, [id]: { ...object, states } } }
+        return { ...doc, objects: { ...doc.objects, [id]: withStates(object, states) } }
       })
     },
 
     setMosaicStroke(id, stateIndex, stroke) {
       mutate((doc) => {
         const object = doc.objects[id]
-        if (!object || object.kind !== 'mosaic') return doc
+        if (!object || !isTiled(object)) return doc
         const at = object.states[stateIndex] ? stateIndex : 0
         const state = object.states[at]
         if (!state) return doc
 
         if (sameStroke(state.stroke ?? null, stroke)) return doc
 
-        const states = [...object.states]
+        const states = tiledStates(object)
         // Carried forward through the states that are still copies of this one,
         // the same way the backdrop and the corners are.
-        for (const index of [at, ...followersOf(object.states, at)]) {
+        for (const index of [at, ...followersOf(object, at)]) {
           const each = states[index]
           if (each) states[index] = { ...each, stroke }
         }
-        return { ...doc, objects: { ...doc.objects, [id]: { ...object, states } } }
+        return { ...doc, objects: { ...doc.objects, [id]: withStates(object, states) } }
       })
     },
 
@@ -2095,6 +2268,16 @@ export const useDocumentStore = create<DocumentState>()((set, get) => {
       return made.id
     },
 
+    setStatedBackground(id, background) {
+      mutate((doc) => {
+        const object = doc.objects[id]
+        if (!object || !isStated(object)) return doc
+        if (object.states.every((state) => (state.background ?? null) === background)) return doc
+        const states = object.states.map((state) => ({ ...state, background }))
+        return { ...doc, objects: { ...doc.objects, [id]: { ...object, states } as typeof object } }
+      })
+    },
+
     setFrameStateBackground(id, index, background) {
       mutate((doc) => {
         const object = doc.objects[id]
@@ -2186,7 +2369,7 @@ export const useDocumentStore = create<DocumentState>()((set, get) => {
          * rule exists to prevent — and an unauthored state is not work, so
          * nothing is lost. An authored one still stops it dead.
          */
-        for (const index of [at, ...followersOf(object.states, at)]) {
+        for (const index of [at, ...followersOf(object, at)]) {
           const each = states[index]
           if (each) states[index] = { ...each, x: { ...x }, y: { ...y } }
         }
@@ -2520,6 +2703,338 @@ export const useDocumentStore = create<DocumentState>()((set, get) => {
         }
       })
       return result.absorbedBy
+    },
+
+    createMesh({ columns, rows, artboardCenter, text }) {
+      const id = createId()
+      const count = get().doc.objectOrder.length + 1
+      const seeded = seedMesh(columns, rows, MESH_CELL)
+      const written = withCharacters(seeded.tiles, text ?? '')
+      const states: MeshState[] = Array.from({ length: MESH_DEFAULT_STATES }, () => ({
+        ...initialMeshState(seeded.positions, documentDefaults.font),
+        chars: { ...written },
+      }))
+
+      const object: MeshObject = {
+        kind: 'mesh',
+        id,
+        name: `Mesh ${count}`,
+        // A new mesh's backdrop is the whole box, as a mosaic's is.
+        backdrop: 'box',
+        // The seed is centred on the origin, so the box is too — and it
+        // follows the nodes from here on rather than staying what it was made as.
+        localBounds: meshBounds(states),
+        transform: {
+          x: artboardCenter.x,
+          y: artboardCenter.y,
+          scaleX: 1,
+          scaleY: 1,
+          rotation: 0,
+          flipX: false,
+          flipY: false,
+        },
+        nodes: seeded.nodes,
+        tiles: seeded.tiles,
+        seed: { columns: Math.max(1, Math.floor(columns)), rows: Math.max(1, Math.floor(rows)) },
+        states,
+        snapStep: MOSAIC_DEFAULT_SNAP,
+        loop: true,
+        speed: 1,
+        opacity: 1,
+        visible: true,
+        locked: false,
+      }
+
+      set((state) => ({
+        doc: {
+          ...state.doc,
+          objects: { ...state.doc.objects, [id]: object },
+          objectOrder: [...state.doc.objectOrder, id],
+          updatedAt: new Date().toISOString(),
+        },
+        selection: [id],
+      }))
+      return id
+    },
+
+    setMeshNodes(id, stateIndex, updates) {
+      mutate((doc) => {
+        const object = doc.objects[id]
+        if (!object || object.kind !== 'mesh') return doc
+        const at = object.states[stateIndex] ? stateIndex : 0
+        const state = object.states[at]
+        if (!state) return doc
+
+        const known = new Set(object.nodes.map((node) => node.id))
+        const next = { ...state.nodes }
+        let changed = false
+        for (const update of updates) {
+          if (!known.has(update.id)) continue
+          if (!Number.isFinite(update.at.x) || !Number.isFinite(update.at.y)) continue
+          const was = next[update.id]
+          if (was && was.x === update.at.x && was.y === update.at.y) continue
+          next[update.id] = { x: update.at.x, y: update.at.y }
+          changed = true
+        }
+        if (!changed) return doc
+
+        const states = [...object.states]
+        for (const index of [at, ...followersOf(object, at)]) {
+          const each = states[index]
+          if (each) states[index] = { ...each, nodes: { ...next } }
+        }
+        return {
+          ...doc,
+          objects: { ...doc.objects, [id]: { ...object, states, localBounds: meshBounds(states) } },
+        }
+      })
+    },
+
+    setMeshBackdrop(id, backdrop) {
+      mutate((doc) => {
+        const object = doc.objects[id]
+        if (!object || object.kind !== 'mesh' || object.backdrop === backdrop) return doc
+        return { ...doc, objects: { ...doc.objects, [id]: { ...object, backdrop } } }
+      })
+    },
+
+    setMeshLines(id, stateIndex, lines) {
+      mutate((doc) => {
+        const object = doc.objects[id]
+        if (!object || object.kind !== 'mesh') return doc
+        const at = object.states[stateIndex] ? stateIndex : 0
+        const state = object.states[at]
+        if (!state) return doc
+        if (sameStroke(state.lines ?? null, lines)) return doc
+        const states = [...object.states]
+        for (const index of [at, ...followersOf(object, at)]) {
+          const each = states[index]
+          if (each) states[index] = { ...each, lines }
+        }
+        return { ...doc, objects: { ...doc.objects, [id]: { ...object, states } } }
+      })
+    },
+
+    resizeMeshGrid(id, columns, rows) {
+      const existing = get().doc.objects[id]
+      if (!existing || existing.kind !== 'mesh') return false
+      const cols = Math.max(1, Math.min(MESH_MAX_SIDE, Math.floor(columns)))
+      const count = Math.max(1, Math.min(MESH_MAX_SIDE, Math.floor(rows)))
+      if (cols === existing.seed.columns && count === existing.seed.rows) return false
+
+      mutate((doc) => {
+        const object = doc.objects[id]
+        if (!object || object.kind !== 'mesh') return doc
+        const seeded = seedMesh(cols, count, MESH_CELL)
+        // Letters and colours travel in reading order, as a mosaic's do on
+        // a resize; positions are fresh in every state.
+        const states = object.states.map((state, at) => {
+          const order = allMeshTiles(object, at)
+          const carry = <T,>(map: Record<string, T>): Record<string, T> => {
+            const out: Record<string, T> = {}
+            order.forEach((from, index) => {
+              const to = seeded.tiles[index]
+              const value = map[from]
+              if (to && value !== undefined) out[to.id] = value
+            })
+            return out
+          }
+          return {
+            ...state,
+            nodes: Object.fromEntries(
+              Object.entries(seeded.positions).map(([node, p]) => [node, { x: p.x, y: p.y }]),
+            ),
+            chars: carry(state.chars),
+            glyphColour: carry(state.glyphColour),
+            tileColour: carry(state.tileColour),
+          }
+        })
+        return {
+          ...doc,
+          objects: {
+            ...doc.objects,
+            [id]: {
+              ...object,
+              nodes: seeded.nodes,
+              tiles: seeded.tiles,
+              seed: { columns: cols, rows: count },
+              states,
+              localBounds: meshBounds(states),
+            },
+          },
+        }
+      })
+      return true
+    },
+
+    rebuildMeshGrid(id) {
+      const existing = get().doc.objects[id]
+      if (!existing || existing.kind !== 'mesh') return false
+      const seeded = seedMesh(existing.seed.columns, existing.seed.rows, MESH_CELL)
+      const nodes = Object.fromEntries(
+        Object.entries(seeded.positions).map(([node, p]) => [node, { x: p.x, y: p.y }]),
+      )
+      mutate((doc) => {
+        const object = doc.objects[id]
+        if (!object || object.kind !== 'mesh') return doc
+        const states = object.states.map((state, at) => {
+          const order = allMeshTiles(object, at)
+          const carry = <T,>(map: Record<string, T>): Record<string, T> => {
+            const out: Record<string, T> = {}
+            order.forEach((from, index) => {
+              const to = seeded.tiles[index]
+              const value = map[from]
+              if (to && value !== undefined) out[to.id] = value
+            })
+            return out
+          }
+          return {
+            ...state,
+            nodes: { ...nodes },
+            chars: carry(state.chars),
+            glyphColour: carry(state.glyphColour),
+            tileColour: carry(state.tileColour),
+          }
+        })
+        return {
+          ...doc,
+          objects: {
+            ...doc.objects,
+            [id]: { ...object, nodes: seeded.nodes, tiles: seeded.tiles, states, localBounds: meshBounds(states) },
+          },
+        }
+      })
+      return true
+    },
+
+    resetMeshGrid(id, stateIndex = 0) {
+      const existing = get().doc.objects[id]
+      if (!existing || existing.kind !== 'mesh') return false
+      const at = existing.states[stateIndex] ? stateIndex : 0
+      const state = existing.states[at]
+      if (!state) return false
+      const lattice = latticeOf(existing.tiles)
+      if (!lattice) return false
+      const placed = resetPositions(existing.tiles, lattice, state.nodes, MESH_CELL)
+      const same = Object.entries(placed).every(([node, p]) => {
+        const was = state.nodes[node]
+        return was && was.x === p.x && was.y === p.y
+      })
+      if (same) return false
+      mutate((doc) => {
+        const object = doc.objects[id]
+        if (!object || object.kind !== 'mesh') return doc
+        const states = [...object.states]
+        for (const index of [at, ...followersOf(object, at)]) {
+          const each = states[index]
+          if (each) states[index] = { ...each, nodes: { ...placed } }
+        }
+        return {
+          ...doc,
+          objects: { ...doc.objects, [id]: { ...object, states, localBounds: meshBounds(states) } },
+        }
+      })
+      return true
+    },
+
+    addMeshPoint(id, edge, t) {
+      const existing = get().doc.objects[id]
+      if (!existing || existing.kind !== 'mesh') return null
+      const shape = addPoint(existing, edge, t)
+      if (!shape) return null
+      const made = shape.nodes[shape.nodes.length - 1]?.id ?? null
+      mutate((doc) => reshapeMesh(doc, id, shape))
+      return made
+    },
+
+    removeMeshPoint(id, nodeId) {
+      const existing = get().doc.objects[id]
+      if (!existing || existing.kind !== 'mesh') return false
+      const shape = removePoint(existing, nodeId)
+      if (!shape) return false
+      mutate((doc) => reshapeMesh(doc, id, shape))
+      return true
+    },
+
+    cutMeshTile(id, tileId, entry, exit) {
+      const existing = get().doc.objects[id]
+      if (!existing || existing.kind !== 'mesh') return null
+      const shape = cutTile(existing, tileId, entry, exit)
+      if (!shape) return null
+      const before = new Set(existing.tiles.map((tile) => tile.id))
+      const made = shape.tiles.find((tile) => !before.has(tile.id))?.id ?? null
+      mutate((doc) => reshapeMesh(doc, id, shape))
+      return made
+    },
+
+    extrudeMeshEdge(id, edge, delta, stateIndex) {
+      const existing = get().doc.objects[id]
+      if (!existing || existing.kind !== 'mesh') return null
+      const at = existing.states[stateIndex] ? stateIndex : 0
+      const shape = extrudeEdge(existing, edge, delta, at, thicknessFloor(meshSpacing(existing, at)))
+      if (!shape) return null
+      const made = shape.tiles[shape.tiles.length - 1]?.id ?? null
+      mutate((doc) => reshapeMesh(doc, id, shape))
+      return made
+    },
+
+    removeMeshTiles(id, tileIds) {
+      const existing = get().doc.objects[id]
+      if (!existing || existing.kind !== 'mesh') return false
+      let shape: MeshShape = existing
+      let changed = false
+      for (const tileId of tileIds) {
+        const next = removeTileFromMesh(shape, tileId)
+        if (next) {
+          shape = next
+          changed = true
+        }
+      }
+      if (!changed) return false
+      const final = shape
+      mutate((doc) => reshapeMesh(doc, id, final))
+      return true
+    },
+
+    convertMosaicToMesh(id) {
+      const existing = get().doc.objects[id]
+      if (!existing || existing.kind !== 'mosaic') return null
+      const converted = meshFromMosaic(existing)
+      // Fresh ids for the nodes and tiles, so converting twice — or undoing and
+      // converting again — never lets two objects share a key.
+      const fresh = copyMeshIdentity(converted.nodes, converted.tiles, converted.states)
+      const meshId = createId()
+      const object: MeshObject = {
+        kind: 'mesh',
+        id: meshId,
+        name: existing.name,
+        localBounds: meshBounds(fresh.states),
+        transform: { ...existing.transform },
+        nodes: fresh.nodes,
+        tiles: fresh.tiles,
+        seed: { ...existing.seed },
+        states: fresh.states,
+        snapStep: existing.snapStep,
+        // A mosaic's backdrop is its box, and the picture must not change.
+        backdrop: 'box',
+        loop: existing.loop,
+        speed: existing.speed,
+        opacity: existing.opacity,
+        visible: existing.visible,
+        locked: existing.locked,
+      }
+      mutate((doc) => {
+        const objects = { ...doc.objects }
+        delete objects[id]
+        objects[meshId] = object
+        return {
+          ...doc,
+          objects,
+          objectOrder: doc.objectOrder.map((each) => (each === id ? meshId : each)),
+        }
+      })
+      set({ selection: [meshId] })
+      return meshId
     },
 
     createMosaic({ columns, rows, artboardCenter, text }) {

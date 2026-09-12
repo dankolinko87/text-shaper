@@ -129,7 +129,7 @@ export function findTile(tiles: readonly MosaicTile[], id: string): MosaicTile |
  * to the composition, and a tile is only the place it is written.
  */
 export function withCharacters(
-  tiles: readonly MosaicTile[],
+  tiles: readonly { id: string }[],
   text: string,
 ): Record<string, string> {
   const chars = [...text]

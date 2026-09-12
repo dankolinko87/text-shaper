@@ -16,6 +16,7 @@ import {
   FolderOpen,
   Hand,
   LayoutDashboard,
+  Waypoints,
   Lock,
   LockOpen,
   Maximize,
@@ -45,6 +46,7 @@ export type IconName =
   | 'pencil'
   | 'pen'
   | 'mosaic'
+  | 'mesh'
   | 'hand'
   | 'duplicate'
   | 'trash'
@@ -126,6 +128,7 @@ const ICONS: Record<IconName, LucideIcon> = {
   // whatever sizes the composition wants, and an even 3×3 would promise a
   // regularity the tool spends its whole time letting you break.
   mosaic: LayoutDashboard,
+  mesh: Waypoints,
   hand: Hand,
   duplicate: Copy,
   trash: Trash2,

@@ -77,7 +77,7 @@ export function collectTransforms(
      * built from it and every member is drawn inside that, so scaling the frame
      * scales its whole arrangement together, which is what resizing one means.
      */
-    if (object.kind === 'mosaic' || object.kind === 'frame') {
+    if (object.kind === 'mosaic' || object.kind === 'frame' || object.kind === 'mesh') {
       updates.push({ id, transform: next, bake: null })
       continue
     }

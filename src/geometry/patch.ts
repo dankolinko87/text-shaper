@@ -161,6 +161,49 @@ function withTable(edge: PatchEdge, from: Vec2, to: Vec2): PatchEdge {
   return { ...edge, table }
 }
 
+/**
+ * A lookup table sampled evenly by ARC LENGTH along a polyline.
+ *
+ * For an edge that is straight between its points — a mesh cell's side, whose
+ * bends are the user's — rather than the Hermite curve `withTable` fits, which
+ * would round every bend off. `evaluatePatch` reads only the table, so a patch
+ * assembled from these is evaluated exactly as one built from an outline.
+ * A single point gives a table of that point, which is a side of no length: a
+ * triangle's collapsed side, and the map copes with it.
+ */
+export function tableFromPolyline(points: readonly Vec2[], entries: number): Vec2[] {
+  const table: Vec2[] = []
+  const count = Math.max(1, Math.floor(entries))
+  const first = points[0] ?? { x: 0, y: 0 }
+  if (points.length < 2) {
+    for (let i = 0; i <= count; i++) table.push({ ...first })
+    return table
+  }
+  const lengths: number[] = [0]
+  for (let i = 1; i < points.length; i++) {
+    const a = points[i - 1] as Vec2
+    const b = points[i] as Vec2
+    lengths.push((lengths[i - 1] as number) + Math.hypot(b.x - a.x, b.y - a.y))
+  }
+  const total = lengths[lengths.length - 1] as number
+  if (!(total > 0)) {
+    for (let i = 0; i <= count; i++) table.push({ ...first })
+    return table
+  }
+  let segment = 1
+  for (let i = 0; i <= count; i++) {
+    const target = (total * i) / count
+    while (segment < points.length - 1 && (lengths[segment] as number) < target) segment++
+    const a = points[segment - 1] as Vec2
+    const b = points[segment] as Vec2
+    const from = lengths[segment - 1] as number
+    const span = (lengths[segment] as number) - from
+    const t = span > 0 ? clamp((target - from) / span, 0, 1) : 0
+    table.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t })
+  }
+  return table
+}
+
 /** A point on an edge, at `t` from its start corner to its end corner. */
 export function edgePoint(edge: PatchEdge, _from: Vec2, _to: Vec2, t: number): Vec2 {
   const table = edge.table

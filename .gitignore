@@ -24,6 +24,9 @@ dist-ssr
 *.sw?
 preview/
 
+# The dev server's copy of the autosave: this machine's work, not the project's.
+.autosave/
+
 # Pre-git safety copies: the notes stay, the copied files do not.
 .revert/**
 !.revert/*/

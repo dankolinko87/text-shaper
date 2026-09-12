@@ -1,15 +1,17 @@
 import { isMoving } from '../typography/objectFit'
 import { fitKey } from './fitKey'
 import { sameArrangement } from '../frame/frame'
+import { sameMeshGeometry } from '../mesh/dissection'
 import { sameGeometry } from '../mosaic/dissection'
 import type {
   DocumentObject,
   FrameObject,
   LetterMosaicObject,
+  MeshObject,
   TextShaperDocument,
   TypographyObject,
 } from '../types/document'
-import { isFrame, isMosaic, isTypography } from '../types/document'
+import { isFrame, isMesh, isMosaic, isTypography } from '../types/document'
 
 /**
  * Every decision the animation loop makes, with no canvas and no clock in it.
@@ -294,4 +296,21 @@ export function animatingMosaicIds(
   state: StatedPlaybackState,
 ): { ids: string[]; shared: boolean } {
   return animatingStatedIds(doc, state, isMosaic, mosaicMoves)
+}
+
+/** Whether a mesh has anything to animate: the mosaic's rule, on positions. */
+export function meshMoves(object: MeshObject): boolean {
+  for (let at = 1; at < object.states.length; at++) {
+    const previous = object.states[at - 1]
+    const current = object.states[at]
+    if (previous && current && !sameMeshGeometry(previous, current)) return true
+  }
+  return false
+}
+
+export function animatingMeshIds(
+  doc: TextShaperDocument,
+  state: StatedPlaybackState,
+): { ids: string[]; shared: boolean } {
+  return animatingStatedIds(doc, state, isMesh, meshMoves)
 }

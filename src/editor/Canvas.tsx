@@ -21,6 +21,7 @@ import { useUiStore, type ToolId } from '../state/uiStore'
 import type {
   FrameObject,
   LetterMosaicObject,
+  MeshObject,
   Rect,
   TextShaperDocument,
   Transform2D,
@@ -51,10 +52,14 @@ import { frameAt, prepareFrames, stillFrame } from '../typography/objectFit'
 import { GridLayer } from './GridLayer'
 import { applyColourGuard } from './colourGuard'
 import { firstTile, tileAt } from '../mosaic/tiles'
+import { firstMeshTile, meshTileAt } from '../mesh/layout'
+import { evaluateMeshAtTime, meshAuthoredTimeFor, restingMeshFrame } from '../mesh/timeline'
+import { newPaintCache, paintMeshFrame, type MeshPaintCache } from './meshPlayback'
 import { evaluateFrameAtTime, frameAuthoredTimeFor, valuesFor } from '../frame/frame'
 import { FrameLayer } from './FrameLayer'
 import { FramePlate } from './FramePlate'
 import { memberBoxes } from './frameBoxes'
+import { MeshLayer } from './MeshLayer'
 import { MosaicLayer } from './MosaicLayer'
 import { showState, shownWindow, spreadHoldsGround, windowTransform } from './stated'
 import { ObjectBar } from './ObjectBar'
@@ -67,6 +72,7 @@ import { PenLayer } from './PenLayer'
 import {
   animatingFrameIds,
   animatingIds,
+  animatingMeshIds,
   animatingMosaicIds,
   phaseAt,
   playbackDiff,
@@ -129,6 +135,8 @@ export function EditorCanvas() {
     preview: FabricRect
     label: FabricText
     grid: Path | null
+    /** Which kind the drag makes: a mosaic, or its free-cornered cousin. */
+    kind: 'mosaic' | 'mesh'
     /** What `grid` was drawn for, so it is only rebuilt when that changes. */
     cells: { columns: number; rows: number }
   } | null>(null)
@@ -687,12 +695,12 @@ export function EditorCanvas() {
       const store = useDocumentStore.getState()
       // Empty, and ready to be typed into. A mosaic is made to hold what someone
       // is about to write in it.
-      const id = store.createMosaic({
-        columns,
-        rows,
-        artboardCenter: { x: (drag.from.x + to.x) / 2, y: (drag.from.y + to.y) / 2 },
-      })
-      store.commit('Draw mosaic')
+      const artboardCenter = { x: (drag.from.x + to.x) / 2, y: (drag.from.y + to.y) / 2 }
+      const id =
+        drag.kind === 'mesh'
+          ? store.createMesh({ columns, rows, artboardCenter })
+          : store.createMosaic({ columns, rows, artboardCenter })
+      store.commit(drag.kind === 'mesh' ? 'Draw mesh' : 'Draw mosaic')
       useUiStore.getState().setTool('select')
 
       /*
@@ -705,6 +713,9 @@ export function EditorCanvas() {
       const made = useDocumentStore.getState().doc.objects[id]
       if (made?.kind === 'mosaic') {
         const first = firstTile(made)
+        if (first) useUiStore.getState().setTyping({ object: id, leaf: first })
+      } else if (made?.kind === 'mesh') {
+        const first = firstMeshTile(made)
         if (first) useUiStore.getState().setTyping({ object: id, leaf: first })
       }
     }
@@ -749,7 +760,7 @@ export function EditorCanvas() {
         return
       }
 
-      if (tool === 'mosaic') {
+      if (tool === 'mosaic' || tool === 'mesh') {
         const p = canvas.getScenePoint(opt.e)
         const from = { x: p.x, y: p.y }
         hoverRef.current = from
@@ -780,7 +791,7 @@ export function EditorCanvas() {
           evented: false,
           objectCaching: false,
         })
-        mosaicRef.current = { from, preview, label, grid: null, cells: { columns: 0, rows: 0 } }
+        mosaicRef.current = { from, preview, label, grid: null, kind: tool, cells: { columns: 0, rows: 0 } }
         canvas.add(preview)
         canvas.add(label)
         return
@@ -1047,6 +1058,22 @@ export function EditorCanvas() {
         return
       }
 
+      if (object.kind === 'mesh') {
+        const stamped = opt.target?.get('stateIndex')
+        const shown = Math.min(
+          typeof stamped === 'number' ? stamped : (useUiStore.getState().mosaicStates[id] ?? 0),
+          object.states.length - 1,
+        )
+        const window = useUiStore.getState().spread === id ? shown : 0
+        const at = pointArtboardToObject(windowTransform(object, window), canvas.getScenePoint(opt.e))
+        const leaf = meshTileAt(object, at, shown) ?? firstMeshTile(object, shown)
+        if (!leaf) return
+        store.setSelection([id])
+        showState(object, shown)
+        ui.setTyping({ object: id, leaf })
+        return
+      }
+
       if (object.kind === 'mosaic') {
         /*
          * Against the state the pressed WINDOW draws, which its stamp says —
@@ -1241,6 +1268,17 @@ export function EditorCanvas() {
     const found = typing ? objectsById[typing.object] : undefined
     return found?.kind === 'mosaic' ? found : undefined
   })()
+  /** Or the mesh: the same mode, on polygons. */
+  const editedMesh = (() => {
+    const found = typing ? objectsById[typing.object] : undefined
+    return found?.kind === 'mesh' ? found : undefined
+  })()
+  const shownMesh = (() => {
+    if (editedMesh) return editedMesh
+    if (selection.length !== 1) return undefined
+    const selected = selection[0] ? objectsById[selection[0]] : undefined
+    return selected?.kind === 'mesh' ? selected : undefined
+  })()
 
   const shownMosaic = (() => {
     if (editedMosaic) return editedMosaic
@@ -1316,7 +1354,7 @@ export function EditorCanvas() {
     return found && isStated(found) ? found : undefined
   })()
 
-  const inside = editing || Boolean(editedMosaic) || Boolean(insideFrame)
+  const inside = editing || Boolean(editedMosaic) || Boolean(editedMesh) || Boolean(insideFrame)
   const editingRef = useRef(inside)
   editingRef.current = inside
 
@@ -1329,7 +1367,7 @@ export function EditorCanvas() {
    * marquee cannot also scale it, and everything else on the canvas carries on
    * answering clicks as usual.
    */
-  const colouringId = editedMosaic ? editedMosaic.id : null
+  const colouringId = editedMosaic ? editedMosaic.id : editedMesh ? editedMesh.id : null
   const colouringIdRef = useRef(colouringId)
   colouringIdRef.current = colouringId
 
@@ -1347,6 +1385,7 @@ export function EditorCanvas() {
 
   useAnimationLoop(fabricRef, renderedRef)
   useMosaicPlayback(fabricRef, renderedRef)
+  useMeshPlayback(fabricRef, renderedRef)
   useFramePlayback(fabricRef, renderedRef, fits, spread)
 
   /* ------------------------------------------------- tool -> cursor */
@@ -1408,6 +1447,8 @@ export function EditorCanvas() {
         clicking away puts it out without the selection having to change too.
       */}
       <MosaicLayer canvas={fabricRef.current} object={shownMosaic} />
+      {/* The same furniture on a mesh's polygons. */}
+      <MeshLayer canvas={fabricRef.current} object={shownMesh} />
       {/*
         Picking and moving what is inside a frame. Mounted always and inert
         unless you are in one, the same as the layers above it.
@@ -1421,7 +1462,7 @@ export function EditorCanvas() {
         hover, focus and a real menu. It follows the mosaic being typed into
         even while nothing is selected.
       */}
-      <ObjectBar canvas={fabricRef.current} inside={editedMosaic} />
+      <ObjectBar canvas={fabricRef.current} inside={editedMosaic ?? editedMesh} />
       {/* What a press means on a row, for every kind; and the number over each window. */}
       <SpreadLayer canvas={fabricRef.current} object={spreadObject} />
       <SpreadChips canvas={fabricRef.current} object={spreadObject} />
@@ -1505,7 +1546,7 @@ function applyCanvasMode(
   const drawing = activeTool === 'draw'
   const panning = activeTool === 'pan'
   const penning = activeTool === 'pen'
-  const mosaicking = activeTool === 'mosaic'
+  const mosaicking = activeTool === 'mosaic' || activeTool === 'mesh'
   const framing = activeTool === 'frame'
   // No grid tool here any more: editing a shape is a MODE, and `editing` below
   // already says so. Its cursor is not a crosshair either — nothing is being
@@ -1902,6 +1943,91 @@ function useMosaicPlayback(
         ui.pauseMosaicPlayback(from + (performance.now() - epoch))
       } else {
         for (const id of animating) settle(id)
+        canvas.requestRenderAll()
+      }
+    }
+  }, [fabricRef, renderedRef, key, from, shared])
+}
+
+/**
+ * Meshes, running between their arrangements.
+ *
+ * The mosaic's loop with the mesh's painter: every tick evaluates the mesh at
+ * authored time and rewrites the group's paths in place. A cache per mesh
+ * remembers which tiles stood still, so a frame that moves one corner costs
+ * one corner's tiles.
+ */
+function useMeshPlayback(
+  fabricRef: React.RefObject<FabricCanvas | null>,
+  renderedRef: React.RefObject<Map<string, RenderedObject>>,
+): void {
+  const playback = useUiStore((s) => s.mosaicPlayback)
+  const shownStates = useUiStore((s) => s.mosaicStates)
+  const globalPlaying = useUiStore((s) => s.playing)
+  const spread = useUiStore((s) => s.spread)
+  const doc = useDocumentStore((s) => s.doc)
+
+  const liveRef = useRef({ doc, shownStates })
+  liveRef.current = { doc, shownStates }
+
+  const previewing = playback?.playing === true ? (playback.object ?? null) : null
+  const { ids, shared } = animatingMeshIds(doc, { playing: globalPlaying, previewing, spread })
+  const from = shared ? 0 : (playback?.atMs ?? 0)
+  const key = ids.join(',')
+
+  useEffect(() => {
+    const canvas = fabricRef.current
+    if (key === '' || !canvas) return
+    const animating = key.split(',')
+
+    const objectOf = (id: string): MeshObject | null => {
+      const object = liveRef.current.doc.objects[id]
+      return object && object.kind === 'mesh' ? object : null
+    }
+    const caches = new Map<string, MeshPaintCache>()
+    const paint = (id: string, authored: number | null): void => {
+      const object = objectOf(id)
+      const group = renderedRef.current?.get(id)?.group
+      if (!object || !group) return
+      const centre = (group.get('localCentre') as Vec2 | undefined) ?? { x: 0, y: 0 }
+      let cache = caches.get(id)
+      if (!cache) {
+        cache = newPaintCache()
+        caches.set(id, cache)
+      }
+      const frame =
+        authored === null
+          ? restingMeshFrame(object, liveRef.current.shownStates[id] ?? 0)
+          : evaluateMeshAtTime(object, authored)
+      paintMeshFrame(group as never, frame, object.tiles, centre, cache)
+    }
+
+    let handle = 0
+    const epoch = performance.now()
+    const tick = (): void => {
+      let painted = false
+      for (const id of animating) {
+        const object = objectOf(id)
+        if (!object) continue
+        const wall = from + (performance.now() - epoch)
+        const authored = meshAuthoredTimeFor(object, wall)
+        setPlayhead(id, authored)
+        paint(id, authored)
+        painted = true
+      }
+      if (painted) canvas.requestRenderAll()
+      handle = requestAnimationFrame(tick)
+    }
+    handle = requestAnimationFrame(tick)
+
+    return () => {
+      cancelAnimationFrame(handle)
+      clearPlayhead(animating)
+      const ui = useUiStore.getState()
+      if (!shared && ui.mosaicPlayback?.playing) {
+        ui.pauseMosaicPlayback(from + (performance.now() - epoch))
+      } else {
+        for (const id of animating) paint(id, null)
         canvas.requestRenderAll()
       }
     }
