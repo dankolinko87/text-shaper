@@ -1,3 +1,5 @@
+import { samePaint } from '../typography/paint'
+import type { Paint } from '../types/paint'
 import {
   MOSAIC_DEFAULT_EASING,
   MOSAIC_DEFAULT_HOLD_MS,
@@ -315,7 +317,7 @@ export function sameGeometry(a: MosaicState, b: MosaicState, tolerance = 1e-9): 
 
   // The backdrop shows as much as any tile's does, so a state that has one is
   // authored and must not be overwritten by an edit carrying forward.
-  if ((a.background ?? null) !== (b.background ?? null)) return false
+  if (!samePaint(a.background ?? null, b.background ?? null)) return false
 
   // And its border, for exactly the reason the corners are counted above: it
   // shows. A state given an edge of its own has been authored, and neither an
@@ -323,10 +325,10 @@ export function sameGeometry(a: MosaicState, b: MosaicState, tolerance = 1e-9): 
   if (!sameStroke(a.stroke ?? null, b.stroke ?? null, tolerance)) return false
 
   for (const map of ['glyphColour', 'tileColour'] as const) {
-    const left = a[map] as Record<string, string | null>
-    const right = b[map] as Record<string, string | null>
+    const left = a[map] as Record<string, Paint | null>
+    const right = b[map] as Record<string, Paint | null>
     for (const key of new Set([...Object.keys(left), ...Object.keys(right)])) {
-      if ((left[key] ?? null) !== (right[key] ?? null)) return false
+      if (!samePaint(left[key] ?? null, right[key] ?? null)) return false
     }
   }
 

@@ -40,6 +40,8 @@ interface ProjectsState {
   /** How the current project is pictured; set by the editor once it has a canvas. */
   snapshot: () => string | null
   setSnapshot: (snapshot: () => string | null) => void
+  /** The last save could not be written — almost always the browser's storage is full. */
+  saveFailed: boolean
 
   /** Boot: the workspace, or the old single autosave as project 1, or a fresh project. */
   restoreWorkspace: () => RestoreResult
@@ -118,6 +120,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
     currentId: null,
     snapshot: () => null,
     setSnapshot: (snapshot) => set({ snapshot }),
+    saveFailed: false,
 
     restoreWorkspace() {
       const workspace = readWorkspace()
@@ -184,6 +187,8 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
 
     saveCurrent(options = {}) {
       const { currentId, projects } = get()
+      // Pictures nothing refers to any more are not worth the room they take.
+      useDocumentStore.getState().sweepAssets()
       const doc = useDocumentStore.getState().doc
       if (!currentId) return false
       const index = projects.findIndex((each) => each.id === currentId)
@@ -200,6 +205,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
       set({ projects: next })
       const wrote = writeProjectRaw(currentId, serializeDocument(doc))
       persistIndex()
+      if (get().saveFailed === wrote) set({ saveFailed: !wrote })
       return wrote
     },
 

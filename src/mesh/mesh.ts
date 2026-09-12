@@ -615,24 +615,53 @@ export function bilinearQuad(
 }
 
 /**
- * Where the unit square lands in this tile's glyph polygon, or null when the
- * polygon has collapsed and there is nothing to draw into.
+ * Where the unit square lands in this tile, or null when the polygon has
+ * collapsed and there is nothing to draw into.
  *
  * Three cases, cheapest first: an axis-aligned rectangle is a scale and a
  * shift; a plain quad is bilinear; a ring with bend points is the patch.
+ *
+ * Over the GLYPH polygon by default — where the letters are poured — or over
+ * the VISIBLE one, the tile's whole face, for a picture that fills the tile
+ * rather than the letter in it. The visible tiers are worked out on demand
+ * and kept on the layout, since a patch's tables are not free.
  */
-export function cellMap(layout: MeshTileLayout): ((u: number, v: number) => Vec2) | null {
-  const rect = layout.rect
+export function cellMap(
+  layout: MeshTileLayout,
+  which: 'glyph' | 'visible' = 'glyph',
+): ((u: number, v: number) => Vec2) | null {
+  if (which === 'visible') {
+    if (layout.visibleRect === undefined) {
+      const [i0, i1, i2, i3] = layout.cornerIndices
+      const corners = [i0, i1, i2, i3].map((i) => layout.visible[i] ?? ORIGIN)
+      const usable = layout.cornerIndices.every((i) => i >= 0) && polygonArea(layout.visible) > EPSILON
+      const rect = usable ? rectangleOf(corners) : null
+      layout.visibleRect = rect
+      layout.visiblePatch =
+        usable && !rect && layout.visible.length > 4
+          ? patchFromPolygon(layout.visible, layout.cornerIndices)
+          : null
+    }
+    return mapOver(layout.visible, layout.cornerIndices, layout.visibleRect, layout.visiblePatch ?? null)
+  }
+  return mapOver(layout.glyph, layout.cornerIndices, layout.rect, layout.patch)
+}
+
+function mapOver(
+  polygon: readonly Vec2[],
+  cornerIndices: readonly [number, number, number, number],
+  rect: Rect | null,
+  patch: OutlinePatch | null,
+): ((u: number, v: number) => Vec2) | null {
   if (rect) return (u, v) => ({ x: rect.x + u * rect.width, y: rect.y + v * rect.height })
-  const patch = layout.patch
   if (patch) return (u, v) => evaluatePatch(patch, u, v)
-  const [i0, i1, i2, i3] = layout.cornerIndices
-  const p00 = layout.glyph[i0]
-  const p10 = layout.glyph[i1]
-  const p11 = layout.glyph[i2]
-  const p01 = layout.glyph[i3]
+  const [i0, i1, i2, i3] = cornerIndices
+  const p00 = polygon[i0]
+  const p10 = polygon[i1]
+  const p11 = polygon[i2]
+  const p01 = polygon[i3]
   if (!p00 || !p10 || !p11 || !p01) return null
-  if (!(Math.abs(polygonArea(layout.glyph)) > EPSILON)) return null
+  if (!(Math.abs(polygonArea(polygon)) > EPSILON)) return null
   return (u, v) => bilinearQuad(p00, p10, p11, p01, u, v)
 }
 

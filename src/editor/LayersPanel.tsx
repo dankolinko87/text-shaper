@@ -1,3 +1,4 @@
+import { solidOf } from '../typography/paint'
 import { useState } from 'react'
 import { useUiStore } from '../state/uiStore'
 
@@ -172,14 +173,14 @@ export function LayerWarning({ message }: { message: string }) {
  * mark — so it borrows its first member's.
  */
 function layerSwatch(object: DocumentObject): string {
-  if (object.kind === 'typography') return object.appearance.textFill
+  if (object.kind === 'typography') return solidOf(object.appearance.textFill)
   if (object.kind === 'frame') {
     const first = object.members[0]
     return first ? layerSwatch(first.object) : '#101014'
   }
   const state = object.states[useUiStore.getState().mosaicStates[object.id] ?? 0] ?? object.states[0]
   const tile = Object.values(state?.tileColour ?? {}).find((c) => c !== null)
-  return tile ?? Object.values(state?.glyphColour ?? {})[0] ?? '#101014'
+  return solidOf(tile ?? Object.values(state?.glyphColour ?? {})[0] ?? '#101014')
 }
 
 /** What the layer is OF, in a few characters — the text, or the letters. */

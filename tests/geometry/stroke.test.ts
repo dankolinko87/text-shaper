@@ -91,11 +91,11 @@ describe('one border on the way to another', () => {
      */
     const arriving = blendStroke(null, blue, 0.25)
     expect(arriving?.width, 'at the width it will have').toBe(12)
-    expect(alphaOf(arriving!.colour), 'a quarter of the way in').toBeCloseTo(0.25, 1)
+    expect(alphaOf(arriving!.colour as string), 'a quarter of the way in').toBeCloseTo(0.25, 1)
 
     const leaving = blendStroke(red, null, 0.75)
     expect(leaving?.width).toBe(4)
-    expect(alphaOf(leaving!.colour), 'three quarters gone').toBeCloseTo(0.25, 1)
+    expect(alphaOf(leaving!.colour as string), 'three quarters gone').toBeCloseTo(0.25, 1)
   })
 
   it('reaches each end exactly', () => {
@@ -107,12 +107,12 @@ describe('one border on the way to another', () => {
      */
     const start = blendStroke(red, blue, 0)
     expect(start?.width).toBe(red.width)
-    expect(alphaOf(start!.colour)).toBe(1)
-    expect(start!.colour.slice(0, 7)).toBe('#ff0000')
+    expect(alphaOf(start!.colour as string)).toBe(1)
+    expect((start!.colour as string).slice(0, 7)).toBe('#ff0000')
 
     const end = blendStroke(red, blue, 1)
     expect(end?.width).toBe(blue.width)
-    expect(end!.colour.slice(0, 7)).toBe('#0000ff')
+    expect((end!.colour as string).slice(0, 7)).toBe('#0000ff')
   })
 
   it('is nothing when neither end has one', () => {

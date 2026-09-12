@@ -1,6 +1,10 @@
 import { useMemo, useRef, useState } from 'react'
 
-import { Button, ColorField, Slider, StrokeField, Tooltip } from '../components/controls'
+import { Button, Slider, StrokeField, Tooltip } from '../components/controls'
+import { PaintField, strokePaintField } from './PaintField'
+import { beginCrop, cropTargetFor } from './cropTargets'
+import { samePaint } from '../typography/paint'
+import type { Paint } from '../types/paint'
 import { Icon } from '../components/Icon'
 import { FONTS } from '../fonts/manifest'
 import { canReshape } from '../mosaic/boundaries'
@@ -30,7 +34,7 @@ import {
   Y_MAX,
 } from '../types/mosaic'
 import { GridSizeField } from './GridSizeField'
-import { Section, ColourChip, StrokeChip } from './Section'
+import { Section, PaintChip, StrokeChip } from './Section'
 import { StatedBackgroundField } from './StatedBackgroundField'
 import { StateTimingFields } from './StateTimingFields'
 import { TilePicker } from './TilePicker'
@@ -369,16 +373,16 @@ function useColours(object: LetterMosaicObject, at: number) {
   const targets = useMemo(() => colourTargets(object, at, selection), [object, at, selection])
 
   const read = (
-    of: (leaf: string) => string | null,
-  ): { value: string; mixed: boolean; anyColoured: boolean } => {
+    of: (leaf: string) => Paint | null,
+  ): { value: Paint | null; mixed: boolean; anyColoured: boolean } => {
     if (!state || targets.length === 0) {
       return { value: DEFAULT_GLYPH_COLOUR, mixed: false, anyColoured: false }
     }
     const seen = targets.map(of)
     const first = seen[0] ?? null
     return {
-      value: (first ?? '#ffffffff') as string,
-      mixed: seen.some((each) => each !== first),
+      value: first,
+      mixed: seen.some((each) => !samePaint(each, first)),
       anyColoured: seen.some((each) => each !== null),
     }
   }
@@ -435,7 +439,7 @@ function TilesSection({
   return (
     <Section
       title="Tiles"
-      summary={<ColourChip value={background.mixed ? null : background.value} />}
+      summary={<PaintChip value={background.mixed ? null : background.value} />}
       open={open}
       onToggle={onToggle}
     >
@@ -447,20 +451,21 @@ function TilesSection({
         at all has no value to show, so a selection where none of them is
         coloured reads as mixed rather than as some colour nobody chose.
       */}
-      <ColorField
+      <PaintField
         label="Background"
         value={background.value}
         mixed={background.mixed || (!background.anyColoured && targets.length > 0)}
         disabled={locked}
-        onChange={(colour) =>
-          useDocumentStore.getState().setMosaicTileColour(object.id, at, targets, colour)
+        onChange={(paint) =>
+          useDocumentStore.getState().setMosaicTileColour(object.id, at, targets, paint)
         }
-        onCommit={commitWith('Colour tiles')}
+        onCommit={(label) => useDocumentStore.getState().commit(label)}
+        onCrop={() => beginCrop(cropTargetFor(object.id, 'tile', at, targets))}
         removeLabel="Clear background"
         onRemove={() => {
           const store = useDocumentStore.getState()
           store.setMosaicTileColour(object.id, at, targets, null)
-          store.commit('Clear tile colour')
+          store.commit('Clear tile background')
         }}
       />
 
@@ -597,15 +602,16 @@ function GlyphsSection({
         </p>
       ) : null}
 
-      <ColorField
-        label="Colour"
+      <PaintField
+        label="Fill"
         value={letter.value}
         mixed={letter.mixed}
         disabled={locked}
-        onChange={(colour) =>
-          useDocumentStore.getState().setMosaicGlyphColour(object.id, at, targets, colour)
+        onChange={(paint) =>
+          useDocumentStore.getState().setMosaicGlyphColour(object.id, at, targets, paint)
         }
-        onCommit={commitWith('Colour letters')}
+        onCommit={(label) => useDocumentStore.getState().commit(label)}
+        onCrop={() => beginCrop(cropTargetFor(object.id, 'glyph', at, targets))}
       />
 
 
@@ -655,41 +661,31 @@ function BackdropSection({
 
   return (
     <Section
-      title="Backdrop"
-      summary={<ColourChip value={backdrop} />}
+      title="Background"
+      summary={<PaintChip value={backdrop} />}
       open={open}
       onToggle={onToggle}
     >
       {/*
         Its reach is different from the two above: they follow the tile
-        selection, this one never does. It is one colour for the composition,
+        selection, this one never does. It is one paint for the composition,
         whatever is picked out.
       */}
-      <ColorField
-        label="Colour"
-        value={backdrop ?? '#ffffffff'}
-        mixed={backdrop === null}
+      <PaintField
+        label="Background"
+        value={backdrop}
         emptyLabel="None"
         disabled={previewing}
-        onChange={(colour) =>
-          useDocumentStore.getState().setMosaicBackground(object.id, at, colour)
-        }
-        onCommit={commitWith('Colour backdrop')}
+        onChange={(paint) => useDocumentStore.getState().setMosaicBackground(object.id, at, paint)}
+        onCommit={(label) => useDocumentStore.getState().commit(label)}
+        onCrop={() => beginCrop(cropTargetFor(object.id, 'background', at))}
+        removeLabel="Clear background"
+        onRemove={() => {
+          const store = useDocumentStore.getState()
+          store.setMosaicBackground(object.id, at, null)
+          store.commit('Clear background')
+        }}
       />
-
-      <div className="field">
-        <Button
-          variant="ghost"
-          disabled={previewing || backdrop === null}
-          onClick={() => {
-            const store = useDocumentStore.getState()
-            store.setMosaicBackground(object.id, at, null)
-            store.commit('Clear backdrop')
-          }}
-        >
-          Clear backdrop
-        </Button>
-      </div>
 
 
       {/*
@@ -797,6 +793,7 @@ function BorderSection({
       <StrokeField
         value={state?.stroke ?? null}
         defaults={DEFAULT_OUTLINE}
+        paint={strokePaintField}
         disabled={previewing}
         onChange={(next) =>
           useDocumentStore.getState().setMosaicStroke(object.id, at, next as PositionedStroke | null)

@@ -93,9 +93,9 @@ describe('the border through a transition', () => {
     const quarter = evaluateMosaicAtTime(mosaic, 250).stroke
 
     expect(start?.width, 'already the width it will settle at').toBe(4)
-    expect(alphaOf(start!.colour), 'and none of the opacity').toBeCloseTo(0, 2)
+    expect(alphaOf(start!.colour as string), 'and none of the opacity').toBeCloseTo(0, 2)
     expect(quarter?.width).toBe(4)
-    expect(alphaOf(quarter!.colour), 'a quarter of the way in').toBeCloseTo(0.25, 1)
+    expect(alphaOf(quarter!.colour as string), 'a quarter of the way in').toBeCloseTo(0.25, 1)
   })
 
   it('rests on exactly what each state authored', () => {

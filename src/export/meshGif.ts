@@ -1,12 +1,19 @@
+import { loadAssets, paintAlpha, styleOf } from './paintStyle'
+import { drawWarpedImage, subdivisionsFor } from '../geometry/warpImage'
+import { sourceRectOf } from '../geometry/imagePlacement'
+import { imageFor, sizeOf } from '../editor/imageCache'
+import { isImagePaint } from '../typography/paint'
+import type { ImageAsset, ImagePaint } from '../types/paint'
+import type { MeshTileLayout } from '../types/mesh'
 import { GIFEncoder, applyPalette, quantize } from 'gifenc'
 
 import { dashArrayFor, strokeReach } from '../geometry/stroke'
 import { glyphPath2D, glyphRest } from '../mesh/glyph'
-import { cellMap, edgesOf, roundedPolygonCommands, type PathCommand } from '../mesh/mesh'
+import { cellMap, edgesOf, polygonBounds, roundedPolygonCommands, type PathCommand } from '../mesh/mesh'
 import { silhouetteCommands } from '../editor/meshPlayback'
 import { evaluateMeshAtTime, meshAuthoredTimeFor, meshPlaybackDuration } from '../mesh/timeline'
 import { ARTBOARD_BACKGROUND } from '../state/defaults'
-import type { MeshObject } from '../types/document'
+import type { MeshObject, Rect, Vec2 } from '../types/document'
 import { DEFAULT_GLYPH_COLOUR } from '../types/mosaic'
 
 /**
@@ -26,6 +33,8 @@ export interface MeshGifOptions {
   frames: number
   background: MeshGifBackground
   name: string
+  /** The pictures the mesh's paints refer to. */
+  assets?: Readonly<Record<string, ImageAsset>>
   artboard?: string
 }
 
@@ -36,6 +45,7 @@ export async function exportMeshGif(options: MeshGifOptions): Promise<void> {
 
 export async function renderMeshGif(options: MeshGifOptions): Promise<Uint8Array> {
   const { object, size, frames, background } = options
+  await loadAssets(options.assets)
   if (object.tiles.length === 0) throw new Error('Nothing to export — this mesh has no tiles.')
 
   const canvas = document.createElement('canvas')
@@ -102,10 +112,12 @@ export async function renderMeshGif(options: MeshGifOptions): Promise<Uint8Array
     ctx.clip('evenodd')
 
     if (frame.background) {
-      ctx.fillStyle = frame.background
+      ctx.fillStyle = styleOf(ctx, frame.background, boxOf(silhouette))
+      ctx.globalAlpha = paintAlpha(frame.background)
       ctx.beginPath()
       trace(silhouette)
       ctx.fill('evenodd')
+      ctx.globalAlpha = 1
     }
 
     for (const tile of object.tiles) {
@@ -114,10 +126,13 @@ export async function renderMeshGif(options: MeshGifOptions): Promise<Uint8Array
 
       const fill = frame.tileColours[tile.id] ?? null
       if (fill) {
-        ctx.fillStyle = fill
         ctx.beginPath()
         trace(roundedPolygonCommands(layout.visible, frame.corners.tileRadius))
-        ctx.fill()
+        if (isImagePaint(fill)) warpInto(ctx, fill, layout, 'tile')
+        else {
+          ctx.fillStyle = styleOf(ctx, fill, polygonBounds(layout.visible))
+          ctx.fill()
+        }
       }
 
       const char = frame.chars[tile.id]
@@ -125,10 +140,14 @@ export async function renderMeshGif(options: MeshGifOptions): Promise<Uint8Array
       const rest = glyphRest(frame.font.fontId, char)
       const map = cellMap(layout)
       if (!rest || !map) continue
-      ctx.fillStyle = frame.glyphColours[tile.id] ?? DEFAULT_GLYPH_COLOUR
+      const letter = frame.glyphColours[tile.id] ?? DEFAULT_GLYPH_COLOUR
       ctx.beginPath()
       glyphPath2D(rest, map, ctx)
-      ctx.fill('nonzero')
+      if (isImagePaint(letter)) warpInto(ctx, letter, layout, 'glyph', 'nonzero')
+      else {
+        ctx.fillStyle = styleOf(ctx, letter, polygonBounds(layout.glyph))
+        ctx.fill('nonzero')
+      }
     }
 
     if (frame.lines && frame.lines.width > 0) {
@@ -141,7 +160,7 @@ export async function renderMeshGif(options: MeshGifOptions): Promise<Uint8Array
         ctx.lineTo(b.x, b.y)
       }
       ctx.lineWidth = frame.lines.width
-      ctx.strokeStyle = frame.lines.colour
+      ctx.strokeStyle = styleOf(ctx, frame.lines.colour, boxOf(silhouette))
       ctx.setLineDash(dashArrayFor(frame.lines) ?? [])
       ctx.stroke()
       ctx.setLineDash([])
@@ -165,7 +184,7 @@ export async function renderMeshGif(options: MeshGifOptions): Promise<Uint8Array
       ctx.beginPath()
       trace(silhouette)
       ctx.lineWidth = position === 'centre' ? frame.stroke.width : frame.stroke.width * 2
-      ctx.strokeStyle = frame.stroke.colour
+      ctx.strokeStyle = styleOf(ctx, frame.stroke.colour, boxOf(silhouette))
       ctx.setLineDash(dashArrayFor(frame.stroke) ?? [])
       ctx.stroke()
       ctx.setLineDash([])
@@ -205,4 +224,39 @@ function download(bytes: Uint8Array, filename: string): void {
   link.download = filename
   link.click()
   URL.revokeObjectURL(url)
+}
+
+/** The box a set of path commands covers, for placing a gradient on the silhouette. */
+function boxOf(commands: readonly PathCommand[]): Rect {
+  const points: Vec2[] = []
+  for (const command of commands) {
+    for (let i = 1; i + 1 < command.length; i += 2) {
+      const x = command[i]
+      const y = command[i + 1]
+      if (typeof x === 'number' && typeof y === 'number') points.push({ x, y })
+    }
+  }
+  return points.length > 0 ? polygonBounds(points) : { x: 0, y: 0, width: 1, height: 1 }
+}
+
+/**
+ * A picture bent through a cell, inside the path just traced: the same warp
+ * the canvas draws, clipped to the tile's face or the letter.
+ */
+function warpInto(
+  ctx: CanvasRenderingContext2D,
+  paint: ImagePaint,
+  layout: MeshTileLayout,
+  which: 'tile' | 'glyph',
+  rule: CanvasFillRule = 'nonzero',
+): void {
+  const source = imageFor(paint.asset)
+  const map = cellMap(layout, which === 'tile' ? 'visible' : 'glyph')
+  if (!source || !map) return
+  ctx.save()
+  ctx.clip(rule)
+  ctx.globalAlpha *= paint.opacity ?? 1
+  const box = polygonBounds(which === 'tile' ? layout.visible : layout.glyph)
+  drawWarpedImage(ctx, { image: source, ...sourceRectOf(box, sizeOf(source), paint.crop) }, map, subdivisionsFor(layout))
+  ctx.restore()
 }

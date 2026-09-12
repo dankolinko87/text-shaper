@@ -1,4 +1,6 @@
 import { ease } from '../anim/easing'
+import { blendPaint } from '../typography/paint'
+import type { Paint } from '../types/paint'
 import {
   authoredDuration as totalDuration,
   authoredTimeFor as authoredTimeAt,
@@ -8,7 +10,6 @@ import {
 } from '../anim/timeline'
 import { blendStroke } from '../geometry/stroke'
 import { blendColours, blendGlyphColours } from '../mosaic/timeline'
-import { blendColour } from '../typography/colour'
 import type {
   FontSettings,
   MeshBackdrop,
@@ -52,9 +53,9 @@ export interface EvaluatedMeshFrame {
   fontKey: string
   chars: Record<string, string>
   glyphKeys: Record<string, string>
-  glyphColours: Record<string, string>
-  tileColours: Record<string, string | null>
-  background: string | null
+  glyphColours: Record<string, Paint>
+  tileColours: Record<string, Paint | null>
+  background: Paint | null
   stroke: PositionedStroke | null
   lines: Stroke | null
   /** The object's, carried on the frame so the painter needs nothing else. */
@@ -107,9 +108,9 @@ interface FrameInput {
   corners: MeshCorners
   chars: Record<string, string>
   font: FontSettings
-  glyphColours: Record<string, string>
-  tileColours: Record<string, string | null>
-  background: string | null
+  glyphColours: Record<string, Paint>
+  tileColours: Record<string, Paint | null>
+  background: Paint | null
   stroke: PositionedStroke | null
   lines: Stroke | null
 }
@@ -236,7 +237,7 @@ export function evaluateMeshAtTime(mesh: MeshObject, authoredTimeMs: number): Ev
     font: from.font,
     glyphColours: blendGlyphColours(from.glyphColour, to.glyphColour, e),
     tileColours: blendColours(from.tileColour, to.tileColour, e, null),
-    background: blendColour(from.background ?? null, to.background ?? null, e),
+    background: blendPaint(from.background ?? null, to.background ?? null, e),
     stroke: blendStroke(from.stroke ?? null, to.stroke ?? null, e),
     lines: blendStroke(from.lines ?? null, to.lines ?? null, e),
   })

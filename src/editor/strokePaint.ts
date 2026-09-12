@@ -1,3 +1,4 @@
+import { fillOf } from './paintFill'
 import { Path, Rect as FabricRect, type FabricObject } from 'fabric'
 
 import { dashArrayFor, strokeBand, strokePaint, strokeReach } from '../geometry/stroke'
@@ -38,7 +39,7 @@ export function strokeChild(pathData: string, stroke: PositionedStroke): FabricO
 
   const border = new Path(pathData, {
     fill: 'transparent',
-    stroke: stroke.colour,
+    stroke: fillOf(stroke.colour),
     strokeWidth: width,
     strokeDashArray: dashArrayFor(stroke),
     /*
@@ -127,7 +128,7 @@ export function strokeRect(
     originX: 'center',
     originY: 'center',
     fill: 'transparent',
-    stroke: stroke?.colour ?? 'transparent',
+    stroke: fillOf(stroke?.colour),
     strokeWidth: stroke ? stroke.width : 0,
     strokeDashArray: dashArrayFor(stroke),
     strokeUniform: false,
@@ -177,7 +178,7 @@ export function applyStroke(
     return
   }
   border.set({
-    stroke: stroke.colour,
+    stroke: fillOf(stroke.colour),
     strokeWidth: stroke.width * 2,
     strokeDashArray: dashArrayFor(stroke),
   })

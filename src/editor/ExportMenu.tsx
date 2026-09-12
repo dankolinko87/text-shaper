@@ -30,6 +30,7 @@ export function ExportMenu() {
   const selection = useDocumentStore((s) => s.selection)
   const objects = useDocumentStore((s) => s.doc.objects)
   const artboard = useDocumentStore((s) => s.doc.artboard.background)
+  const assets = useDocumentStore.getState().doc.assets
 
   const [open, setOpen] = useState(false)
   const [size, setSize] = useState<number>(512)
@@ -68,6 +69,7 @@ export function ExportMenu() {
           background: background as MeshGifBackground,
           name: target.name,
           artboard,
+          assets,
         })
       } else if (target.kind === 'mosaic') {
         await exportMosaicGif({
@@ -77,6 +79,7 @@ export function ExportMenu() {
           background: background as MosaicGifBackground,
           name: target.name,
           artboard,
+          assets,
         })
       } else {
         await exportGif({
@@ -85,6 +88,7 @@ export function ExportMenu() {
           frames,
           background: background as GifBackground,
           name: target.name,
+          assets,
         })
       }
     } catch (cause) {

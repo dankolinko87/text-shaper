@@ -1,3 +1,5 @@
+import { solidOf } from '../typography/paint'
+import type { StrokePaint } from '../types/paint'
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 
@@ -627,7 +629,9 @@ export function ColorField({
  * The row is the shape the part will have once added — a name at the left, a
  * control at the right — so adding does not shift the section; and it is the
  * row Figma uses for a fill, a stroke or an effect, which is where everyone's
- * hand already knows it.
+ * hand already knows it. The WHOLE row is the button: the plus says what a
+ * press does, but a target eight pixels wide at the far end of the row is
+ * not one anybody should have to aim for.
  */
 export function AddRow({
   label,
@@ -636,16 +640,18 @@ export function AddRow({
   disabled = false,
 }: {
   label: string
-  /** What the + does, for the tooltip and the screen reader. */
+  /** What a press does, for the screen reader. */
   add: string
   onAdd: () => void
   disabled?: boolean
 }) {
   return (
-    <div className="add-row">
+    <button type="button" className="add-row" aria-label={add} disabled={disabled} onClick={onAdd}>
       <span className="add-row__label">{label}</span>
-      <IconButton icon="plus" label={add} small tooltipSide="top" disabled={disabled} onClick={onAdd} />
-    </div>
+      <span className="add-row__plus" aria-hidden="true">
+        <Icon name="plus" size={16} />
+      </span>
+    </button>
   )
 }
 
@@ -704,6 +710,17 @@ export function NumberField({ label, value, step = 1, onChange, onCommit }: Numb
  * label column, same ghost button — because a border is a paint like a fill and
  * is added the way a fill is.
  */
+/** What a line's paint control is handed. */
+export interface StrokePaintProps {
+  label: string
+  value: StrokePaint
+  disabled: boolean
+  onChange: (next: StrokePaint) => void
+  onCommit: (label: string) => void
+  onRemove: () => void
+  removeLabel: string
+}
+
 export function StrokeField({
   value,
   onChange,
@@ -713,6 +730,7 @@ export function StrokeField({
   addLabel = 'Add border',
   defaults,
   disabled = false,
+  paint,
 }: {
   /** What the part is called on its add row and its remove control. */
   label?: string
@@ -732,6 +750,12 @@ export function StrokeField({
   /** What Add gives you. A visible edge, not an invisible one. */
   defaults: Stroke | PositionedStroke
   disabled?: boolean
+  /**
+   * The line's paint control, when the caller has a richer one than a colour
+   * row — the editor's paint field, which this file cannot reach. Given the
+   * same things the colour row is given.
+   */
+  paint?: (props: StrokePaintProps) => ReactNode
 }) {
   /*
    * No label column on the Add row, and no heading above it.
@@ -763,19 +787,34 @@ export function StrokeField({
 
   return (
     <>
-      <ColorField
-        label={`${label} colour`}
-        bare
-        value={value.colour}
-        disabled={disabled}
-        onChange={(colour) => onChange({ ...value, colour })}
-        onCommit={() => onCommit?.('Change border colour')}
-        removeLabel={`Remove ${label.toLowerCase()}`}
-        onRemove={() => {
-          onChange(null)
-          onCommit?.('Remove border')
-        }}
-      />
+      {paint ? (
+        paint({
+          label: 'Line',
+          value: value.colour,
+          disabled,
+          onChange: (colour) => onChange({ ...value, colour }),
+          onCommit: (what) => onCommit?.(what),
+          removeLabel: `Remove ${label.toLowerCase()}`,
+          onRemove: () => {
+            onChange(null)
+            onCommit?.('Remove border')
+          },
+        })
+      ) : (
+        <ColorField
+          label="Line"
+          bare
+          value={solidOf(value.colour)}
+          disabled={disabled}
+          onChange={(colour) => onChange({ ...value, colour })}
+          onCommit={() => onCommit?.('Change border colour')}
+          removeLabel={`Remove ${label.toLowerCase()}`}
+          onRemove={() => {
+            onChange(null)
+            onCommit?.('Remove border')
+          }}
+        />
+      )}
 
       <Slider
         label="Width"

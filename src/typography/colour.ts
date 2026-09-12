@@ -1,6 +1,8 @@
 import type { ColourConfigValue, ColourEffect, ColourSettings, GradientStop } from '../types/document'
+import type { ImageCrop, Paint } from '../types/paint'
 import { clamp } from '../utils/math'
 import type { AnimationControl, ControlBase } from './animation'
+import { resolvePaint } from './paint'
 
 /**
  * Colour, and what it does over the loop.
@@ -46,6 +48,13 @@ export type FillPaint =
       /** How far the blend reaches, as a share of the box's half-diagonal. */
       radius: number
     }
+  | {
+      kind: 'image'
+      /** Which picture, by asset id; the renderer looks it up. */
+      asset: string
+      crop: ImageCrop
+      opacity: number
+    }
 
 /** A gradient's colours: a list of stops, the one control the generic list cannot draw. */
 export interface StopsControl extends ControlBase {
@@ -71,7 +80,6 @@ export interface ColourEffectDef {
 }
 
 const whole = (v: number): string => `${Math.round(v)}`
-const percent = (v: number): string => `${Math.round(v * 100)}%`
 
 /** The second colour every effect crosses to. Warm, and visible on most things. */
 const SECOND_COLOUR = '#e0552f'
@@ -156,6 +164,21 @@ function sameStops(a: readonly GradientStop[], b: readonly GradientStop[]): bool
 
 const solid = (colour: string): FillPaint => ({ kind: 'solid', colour })
 
+const TAU = Math.PI * 2
+
+/** The stops control the gradient editor draws, now that no effect declares one. */
+export const STOPS_CONTROL: StopsControl = {
+  kind: 'stops',
+  key: 'stops',
+  label: 'Stops',
+  value: [
+    { at: 0, colour: FIRST_COLOUR },
+    { at: 1, colour: SECOND_COLOUR },
+  ],
+  min: MIN_STOPS,
+  max: MAX_STOPS,
+}
+
 export const COLOUR_EFFECTS: readonly ColourEffectDef[] = [
   {
     id: 'none',
@@ -192,187 +215,7 @@ export const COLOUR_EFFECTS: readonly ColourEffectDef[] = [
       return solid(on ? readColour(config, 'to', SECOND_COLOUR) : base)
     },
   },
-  {
-    id: 'gradient',
-    /*
-     * A gradient is an APPEARANCE that may also move, which is the other way
-     * round from how it started.
-     *
-     * It used to be a rotation and nothing else: the only control over its
-     * movement was how many whole turns it made per loop, so the one way to hold
-     * it still was to ask for zero turns — findable, but not from a control
-     * called Turns that starts at 1. And a spin overrules the angle, so setting
-     * an angle on a turning gradient did nothing you could see: the picture at
-     * any moment came from the phase, not from the setting.
-     *
-     * So the gradient and its motion are separate choices now. Pick the shape
-     * and the angle to get a still gradient; pick a motion on top if it should
-     * move. Every motion is at rest at phase 0, so choosing one never changes
-     * the artwork you already had — it only decides where it goes from there.
-     */
-    label: 'Gradient',
-    hint: 'Colours blended through the artwork, still or moving.',
-    controls: [
-      {
-        kind: 'stops',
-        key: 'stops',
-        label: 'Stops',
-        value: [
-          { at: 0, colour: FIRST_COLOUR },
-          { at: 1, colour: SECOND_COLOUR },
-        ],
-        min: MIN_STOPS,
-        max: MAX_STOPS,
-      },
-      {
-        kind: 'choice',
-        key: 'shape',
-        label: 'Shape',
-        options: [
-          { value: 'linear', label: 'Linear' },
-          { value: 'radial', label: 'Radial' },
-        ],
-        value: 'linear',
-      },
-      { kind: 'number', key: 'angle', label: 'Angle', min: 0, max: 359, step: 1, value: 0, format: (v) => `${Math.round(v)}°` },
-      {
-        kind: 'choice',
-        key: 'motion',
-        label: 'Motion',
-        options: [
-          { value: 'still', label: 'Still' },
-          { value: 'sweep', label: 'Side to side' },
-          { value: 'hover', label: 'Hover' },
-          { value: 'pulse', label: 'Pulse' },
-        ],
-        value: 'still',
-      },
-      {
-        kind: 'number',
-        key: 'travel',
-        label: 'Travel',
-        min: 0,
-        max: 1,
-        step: 0.01,
-        value: 0.5,
-        format: percent,
-        // A travel with no motion does nothing, and a live slider that does
-        // nothing is a question with no answer.
-        when: (config) => (config['motion'] ?? 'still') !== 'still',
-      },
-    ],
-    paint: (config, phase, base) => {
-      const stops = gradientStops(config, base)
-      const angle = read(config, 'angle', 0)
-      const motion = readChoice(config, 'motion', 'still')
-      const travel = clamp(read(config, 'travel', 0.5), 0, 1)
-
-      /*
-       * Both of these are ZERO at phase 0 and again at phase 1.
-       *
-       * That is the whole trick to a motion that can be switched on without
-       * disturbing the artwork, and to a loop that closes without a seam: `away`
-       * goes out and comes back, `swing` goes one way, back through the middle,
-       * the other way, and home.
-       */
-      const swing = steady(Math.sin(phase * TAU))
-      const away = steady((1 - Math.cos(phase * TAU)) / 2)
-      // Pulse draws the blend in and lets it back out, for both shapes.
-      const tighten = motion === 'pulse' ? 1 + travel * PULSE_DEPTH * away : 1
-
-      if (readChoice(config, 'shape', 'linear') === 'radial') {
-        // The angle points the way the middle travels, so the one control means
-        // the same thing to both shapes.
-        const radians = (angle * Math.PI) / 180
-        const along = motion === 'sweep' ? travel * 0.35 * swing : 0
-        // A circle for the drift, so it comes home rather than doubling back.
-        const driftX = motion === 'hover' ? travel * 0.16 * (Math.cos(phase * TAU) - 1) : 0
-        const driftY = motion === 'hover' ? travel * 0.16 * Math.sin(phase * TAU) : 0
-        return {
-          kind: 'gradient',
-          shape: 'radial',
-          stops,
-          centre: {
-            x: steady(0.5 + Math.cos(radians) * along + driftX),
-            y: steady(0.5 + Math.sin(radians) * along + driftY),
-          },
-          radius: steady(RADIAL_REACH / tighten),
-        }
-      }
-
-      return {
-        kind: 'gradient',
-        shape: 'linear',
-        stops,
-        // Hover leans the axis and drifts it at the same time, a quarter turn
-        // apart, so the blend floats around rather than wiping across. A lean on
-        // its own barely reads: a linear gradient looks much the same rotated a
-        // few degrees, which is why this needed both.
-        angle: steady(wrapDegrees(angle + (motion === 'hover' ? travel * HOVER_LEAN * swing : 0))),
-        offset: steady(
-          motion === 'sweep'
-            ? travel * 0.6 * swing
-            : motion === 'hover'
-              ? travel * 0.3 * ((Math.cos(phase * TAU) - 1) / 2)
-              : 0,
-        ),
-        // Pulse draws the blend in to a tight band and lets it back out.
-        //
-        // In rather than out, and DIVIDING rather than subtracting. Loosening a
-        // linear blend past the box barely shows — it is already covering
-        // everything, and stretching it only flattens the contrast — so a pulse
-        // that breathed both ways spent half its loop doing nothing visible.
-        // Dividing keeps a hard pull at full travel from ever reaching zero,
-        // which subtracting would.
-        spread: steady(1 / tighten),
-      }
-    },
-  },
 ]
-
-/** How far a radial gradient reaches at rest, in half-diagonals. */
-const RADIAL_REACH = 0.75
-
-/*
- * How hard hover and pulse pull, at full travel.
- *
- * Sized so that all three motions move the picture by comparable amounts at the
- * same Travel setting, which they did not to begin with: measured as the average
- * shift in the blend across the box, side to side moved it 23% at half travel
- * while hover and pulse managed 6% — a quarter as much, weak enough to read as a
- * control that does nothing at all.
- */
-const HOVER_LEAN = 45
-const PULSE_DEPTH = 2
-
-/**
- * Round off the last few bits, so the loop closes on the same NUMBERS.
- *
- * `Math.sin(2 * Math.PI)` is not zero, it is -2.4e-16, and a closing frame that
- * differs from the opening one by that much looks identical and compares as
- * different — which is enough to make everything downstream redraw a frame it
- * did not need to, and enough to fail the seam test that exists to catch real
- * drift. Far finer than anything that draws can resolve.
- */
-function steady(value: number): number {
-  return Math.round(value * 1e6) / 1e6
-}
-
-function readChoice(
-  config: ColourConfig,
-  key: string,
-  fallback: string,
-): string {
-  const value = config[key]
-  return typeof value === 'string' && value.length > 0 ? value : fallback
-}
-
-const TAU = Math.PI * 2
-
-/** Into 0..360, so a full turn reports the angle it started from. */
-function wrapDegrees(angle: number): number {
-  return ((angle % 360) + 360) % 360
-}
 
 export function colourEffectById(id: ColourEffect): ColourEffectDef {
   return COLOUR_EFFECTS.find((effect) => effect.id === id) ?? (COLOUR_EFFECTS[0] as ColourEffectDef)
@@ -400,20 +243,36 @@ export function defaultColourConfig(id: ColourEffect, base?: string): Record<str
   return out
 }
 
-/** What to fill with at this moment. */
+/**
+ * What to fill with at this moment.
+ *
+ * A colour effect acts on a SOLID base: cycle and flicker take one colour
+ * somewhere and back. A gradient or a picture is a paint with its own idea
+ * of the loop, so the effect stands aside and the paint answers for itself.
+ */
 export function paintAt(
   settings: ColourSettings | undefined,
   phase: number,
-  base: string,
+  base: Paint,
 ): FillPaint {
+  if (typeof base !== 'string') return resolvePaint(base, phase) as FillPaint
   if (!settings) return solid(base)
   return colourEffectById(settings.effect).paint(settings.config ?? {}, phase, base)
 }
 
-/** Whether two paints would draw the same, for skipping work. */
-export function samePaint(a: FillPaint, b: FillPaint): boolean {
+/** Whether two resolved paints would draw the same, for skipping work. */
+export function sameFillPaint(a: FillPaint, b: FillPaint): boolean {
   if (a.kind !== b.kind) return false
   if (a.kind === 'solid' && b.kind === 'solid') return a.colour === b.colour
+  if (a.kind === 'image' && b.kind === 'image') {
+    return (
+      a.asset === b.asset &&
+      a.crop.scale === b.crop.scale &&
+      a.crop.x === b.crop.x &&
+      a.crop.y === b.crop.y &&
+      a.opacity === b.opacity
+    )
+  }
   if (a.kind === 'gradient' && b.kind === 'gradient') {
     if (a.shape !== b.shape || !sameStops(a.stops, b.stops)) return false
     if (a.shape === 'radial' && b.shape === 'radial') {

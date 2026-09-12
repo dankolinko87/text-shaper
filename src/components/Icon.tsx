@@ -35,6 +35,9 @@ import {
   Rows2,
   Save,
   Square,
+  Blend,
+  Crop,
+  Image as ImageIcon,
   Trash2,
   TriangleAlert,
   Undo2,
@@ -82,6 +85,10 @@ export type IconName =
   | 'collapse'
   | 'close'
   | 'splitHorizontal'
+  | 'image'
+  | 'crop'
+  | 'square'
+  | 'blend'
 
 /**
  * The three sizes an icon may be, and there are only three on purpose.
@@ -178,6 +185,10 @@ const ICONS: Record<IconName, LucideIcon> = {
   download: Download,
   frame: Frame,
   grip: GripVertical,
+  image: ImageIcon,
+  crop: Crop,
+  square: Square,
+  blend: Blend,
 }
 
 /**

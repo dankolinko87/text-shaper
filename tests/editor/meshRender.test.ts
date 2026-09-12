@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
+import { createCanvas } from 'canvas'
 import { Canvas } from 'fabric/node'
 import opentype from 'opentype.js'
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
@@ -14,6 +15,8 @@ import { useDocumentStore } from '../../src/state/documentStore'
 import { registerFont } from '../../src/typography/fontRegistry'
 import type { Vec2 } from '../../src/types/document'
 import { meshIn } from '../fixtures/objects'
+import { forgetImages, primeImage } from '../../src/editor/imageCache'
+import type { WarpedPath } from '../../src/editor/warpedPath'
 
 /**
  * A mesh on the canvas: where it lands, where its letters go, and that a
@@ -225,5 +228,79 @@ describe('outer padding', () => {
     const midway = padded.getObjects().find((c) => c.get('role') === 'backdrop')!
     expect(midway.width).toBeCloseTo(plainBackdrop.width + 20, 0)
     expect(object.states[1]!.outerPadding, 'state 2 followed state 1').toBe(20)
+  })
+})
+
+/**
+ * A picture in a mesh cell bends with the cell, as the letters do.
+ */
+describe('a picture in a cell', () => {
+  /** Left half red, right half blue. */
+  const source = () => {
+    const c = createCanvas(64, 64)
+    const ctx = c.getContext('2d')
+    ctx.fillStyle = '#ff0000'
+    ctx.fillRect(0, 0, 32, 64)
+    ctx.fillStyle = '#0000ff'
+    ctx.fillRect(32, 0, 32, 64)
+    return c
+  }
+  const pixel = (x: number, y: number): number[] => {
+    const ctx = (canvas.lowerCanvasEl as unknown as { getContext(kind: '2d'): { getImageData(x: number, y: number, w: number, h: number): { data: Uint8ClampedArray } } }).getContext('2d')
+    const d = ctx.getImageData(Math.round(x), Math.round(y), 1, 1).data
+    return [d[0]!, d[1]!, d[2]!, d[3]!]
+  }
+
+  it('is warped through the cell, left to left and right to right', () => {
+    forgetImages()
+    primeImage('img_cell', source() as never)
+    const id = mesh({ x: 400, y: 300 })
+    const object = meshIn(store().doc, id)
+    const tile = object.tiles[0]!
+    // Shear the first tile's outer corner so its map is bilinear, not a rectangle.
+    const corner = nodeAt(id, object.localBounds.x, object.localBounds.y)
+    store().setMeshNodes(id, 0, [{ id: corner, at: { x: object.localBounds.x + 30, y: object.localBounds.y - 40 } }])
+    store().setMosaicTileColour(id, 0, [tile.id], { kind: 'image', asset: 'img_cell', crop: { scale: 1, x: 0, y: 0 } })
+    store().setMosaicChars(id, 0, { [tile.id]: '' })
+    draw()
+
+    const group = rendered.get(id)!.group
+    const child = group.getObjects().find((o) => o.get('role') === 'tile' && o.get('leafId') === tile.id) as unknown as WarpedPath
+    expect(child.picture).not.toBeNull()
+    expect(child.picture!.n, 'a plain quad bends a little').toBe(8)
+    const layout = meshTiles(meshIn(store().doc, id), 0).get(tile.id)!
+    const [i0] = layout.cornerIndices
+    const first = layout.visible[i0]!
+    const at = child.picture!.map(0, 0)
+    expect(at.x).toBeCloseTo(first.x, 6)
+    expect(at.y).toBeCloseTo(first.y, 6)
+
+    /*
+     * Rendered with every clip taken off: a clipped child draws through a
+     * cache canvas, which Fabric makes with `document`, and node has none.
+     * The picture's own drawing has no clip but the tile's outline, which is
+     * the thing being tested.
+     */
+    group.clipPath = undefined
+    group.objectCaching = false
+    for (const each of group.getObjects()) {
+      each.clipPath = undefined
+      each.objectCaching = false
+    }
+    for (const each of canvas.getObjects()) {
+      if (each !== group) each.visible = false
+    }
+    canvas.renderAll()
+    const t = meshIn(store().doc, id).transform
+    const probe = (u: number, v: number) => {
+      const p = child.picture!.map(u, v)
+      return pixel(p.x + t.x, p.y + t.y)
+    }
+    const left = probe(0.25, 0.5)
+    const right = probe(0.75, 0.5)
+    expect(left[0], "red where the picture's left was").toBeGreaterThan(200)
+    expect(left[2]).toBeLessThan(60)
+    expect(right[2], "blue where the picture's right was").toBeGreaterThan(200)
+    expect(right[0]).toBeLessThan(60)
   })
 })

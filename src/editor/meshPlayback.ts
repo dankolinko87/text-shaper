@@ -1,3 +1,6 @@
+import { fillOf } from './paintFill'
+import { isImagePaint } from '../typography/paint'
+import { applyMeshPaint, type PicturedChild } from './warpedPath'
 import { dashArrayFor, strokePaint, strokeReach } from '../geometry/stroke'
 import { emitGlyph, type GlyphRest } from '../mesh/glyph'
 import {
@@ -255,7 +258,7 @@ export function paintMeshFrame(
         ),
         centre,
       )
-      child.set({ fill: frame.background ?? (child.get('restFill') as string | undefined) ?? 'transparent' })
+      child.set({ fill: fillOf(frame.background, (child.get('restFill') as string | undefined) ?? 'transparent') })
       continue
     }
     if (role === 'lines') {
@@ -292,7 +295,7 @@ export function paintMeshFrame(
       if (moved.get(leafId)) {
         placeCommands(child, roundedPolygonCommands(layout.visible, frame.corners.tileRadius), centre)
       }
-      child.set({ fill: frame.tileColours[leafId] ?? 'transparent' })
+      applyMeshPaint(child as unknown as PicturedChild, frame.tileColours[leafId] ?? null, layout, 'tile')
       continue
     }
 
@@ -308,11 +311,19 @@ export function paintMeshFrame(
       child.set({ visible: false })
       continue
     }
-    child.set({ visible: true, fill: frame.glyphColours[leafId] ?? DEFAULT_GLYPH_COLOUR })
-    if (!moved.get(leafId)) continue
+    const paint = frame.glyphColours[leafId] ?? DEFAULT_GLYPH_COLOUR
+    // A picture is placed every frame — its crop may be moving — and never
+    // through the rectangle fast path: a scaled child would stretch it.
+    const pictured = isImagePaint(paint)
+    child.set({ visible: true })
+    if (!pictured) applyMeshPaint(child as unknown as PicturedChild, paint, layout, 'glyph')
+    if (!moved.get(leafId)) {
+      if (pictured) applyMeshPaint(child as unknown as PicturedChild, paint, layout, 'glyph')
+      continue
+    }
 
     const rect = layout.rect
-    if (rect && mark.builtRect && mark.builtRect.width > 0 && mark.builtRect.height > 0) {
+    if (!pictured && rect && mark.builtRect && mark.builtRect.width > 0 && mark.builtRect.height > 0) {
       // A rectangle: the outline built for one rectangle is moved and scaled
       // into another, which is the same map either way.
       child.set({
@@ -332,6 +343,7 @@ export function paintMeshFrame(
     placeCommands(child, mark.commands, centre)
     child.set({ scaleX: 1, scaleY: 1 })
     mark.builtRect = rect ? { ...rect } : null
+    if (pictured) applyMeshPaint(child as unknown as PicturedChild, paint, layout, 'glyph')
   }
 
   // The clip last: the silhouette grown by the border's reach, in the group's

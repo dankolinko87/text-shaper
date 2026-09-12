@@ -18,6 +18,8 @@ import {
   type GlyphMark,
 } from './meshPlayback'
 import { emptyGround, groundRadius } from './invitations'
+import { fillOf } from './paintFill'
+import { WarpedPath, applyMeshPaint } from './warpedPath'
 import { finishGroup, fontKey } from './renderer'
 import { strokeChild } from './strokePaint'
 
@@ -133,7 +135,7 @@ export function buildMeshGroup(
       ),
     ),
     {
-      fill: state?.background ?? ground ?? 'transparent',
+      fill: fillOf(state?.background, ground ?? 'transparent'),
       strokeWidth: 0,
       objectCaching: false,
       evented: false,
@@ -150,14 +152,14 @@ export function buildMeshGroup(
     if (!layout) continue
 
     const colour = state?.tileColour[tile.id] ?? null
-    const shape = new Path(asPath(roundedPolygonCommands(layout.visible, corners.tileRadius)), {
-      fill: colour ?? 'transparent',
+    const shape = new WarpedPath(asPath(roundedPolygonCommands(layout.visible, corners.tileRadius)), {
       strokeWidth: 0,
       objectCaching: false,
       evented: false,
     })
     shape.set('role', 'tile')
     shape.set('leafId', tile.id)
+    applyMeshPaint(shape, colour, layout, 'tile')
     children.push(shape)
 
     // Every letter this tile shows in any state, in every font: cut once,
@@ -179,8 +181,7 @@ export function buildMeshGroup(
         const commands: PathCommand[] = []
         // Poured now, so the static picture is right without a frame.
         if (map) emitGlyph(rest, map, commands)
-        const glyph = new Path(asPath(commands.length > 0 ? commands : [['M', 0, 0], ['Z']]), {
-          fill: state?.glyphColour[tile.id] ?? DEFAULT_GLYPH_COLOUR,
+        const glyph = new WarpedPath(asPath(commands.length > 0 ? commands : [['M', 0, 0], ['Z']]), {
           strokeWidth: 0,
           objectCaching: false,
           evented: false,
@@ -190,6 +191,7 @@ export function buildMeshGroup(
         glyph.set('role', 'glyph')
         glyph.set('leafId', tile.id)
         glyph.set('glyphKey', key)
+        applyMeshPaint(glyph, state?.glyphColour[tile.id] ?? DEFAULT_GLYPH_COLOUR, layout, 'glyph')
         const mark: GlyphMark = {
           rest,
           unitCentre: unitCentreOf(rest.points),

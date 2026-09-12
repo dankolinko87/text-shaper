@@ -1,6 +1,8 @@
 import { useState } from 'react'
 
-import { AddRow, ColorField, SegmentedControl, Slider } from '../components/controls'
+import { AddRow, SegmentedControl, Slider } from '../components/controls'
+import { PaintField } from './PaintField'
+import { beginCrop, cropTargetFor } from './cropTargets'
 import { useDocumentStore } from '../state/documentStore'
 import { useUiStore } from '../state/uiStore'
 import type { FrameObject } from '../types/document'
@@ -109,11 +111,12 @@ export function FrameStatePanel({ object, at }: { object: FrameObject; at: numbe
           }}
         />
       ) : (
-        <ColorField
+        <PaintField
           label="Background"
-          value={state.background ?? '#dcdcd8'}
-          onChange={(colour) => store().setFrameStateBackground(object.id, at, colour)}
-          onCommit={() => store().commit('Change frame background')}
+          value={state.background ?? null}
+          onChange={(paint) => store().setFrameStateBackground(object.id, at, paint)}
+          onCommit={(label) => store().commit(label)}
+          onCrop={() => beginCrop(cropTargetFor(object.id, 'background', at))}
           removeLabel="Remove background"
           onRemove={() => {
             store().setFrameStateBackground(object.id, at, null)

@@ -71,7 +71,7 @@ describe('blending two appearances', () => {
       APPEARANCE({ textFill: '#ffffff' }),
       0.5,
     )
-    const [r, g, b] = parseHex(out.textFill) as [number, number, number, number]
+    const [r, g, b] = parseHex(out.textFill as string) as [number, number, number, number]
     for (const channel of [r, g, b]) expect(channel).toBeGreaterThan(100)
     for (const channel of [r, g, b]) expect(channel).toBeLessThan(155)
   })
@@ -142,6 +142,28 @@ describe('an edit that is only a colour', () => {
     // A colour-only difference has to be able to say "there is something to
     // animate here" for itself.
     expect(sameArrangement(plain, recoloured, [member])).toBe(false)
+  })
+
+  it('counts a gradient where there was a colour, which is what makes it a keyframe too', () => {
+    const blended = stateWith({
+      m1: {
+        transform,
+        opacity: 1,
+        appearance: APPEARANCE({
+          containerFill: {
+            kind: 'gradient',
+            shape: 'linear',
+            stops: [
+              { at: 0, colour: '#dcdcd8' },
+              { at: 1, colour: '#ff0000' },
+            ],
+            angle: 0,
+          },
+        }),
+      },
+    })
+    expect(sameArrangement(plain, blended, [member])).toBe(false)
+    expect(sameArrangement(blended, blended, [member])).toBe(true)
   })
 
   it('is enough to make the frame worth playing', () => {

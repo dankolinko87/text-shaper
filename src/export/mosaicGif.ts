@@ -1,3 +1,5 @@
+import { loadAssets, paintAlpha, styleOf } from './paintStyle'
+import type { ImageAsset } from '../types/paint'
 import { GIFEncoder, applyPalette, quantize } from 'gifenc'
 
 import { glyphInRect } from '../mosaic/glyph'
@@ -38,6 +40,8 @@ export interface MosaicGifOptions {
   frames: number
   background: MosaicGifBackground
   name: string
+  /** The pictures the mosaic's paints refer to. */
+  assets?: Readonly<Record<string, ImageAsset>>
   /** Colour behind the artwork when the background is solid. */
   artboard?: string
 }
@@ -50,6 +54,7 @@ export async function exportMosaicGif(options: MosaicGifOptions): Promise<void> 
 /** The encoded bytes, separated from the download so it can be inspected. */
 export async function renderMosaicGif(options: MosaicGifOptions): Promise<Uint8Array> {
   const { object, size, frames, background } = options
+  await loadAssets(options.assets)
   if (object.tiles.length === 0) throw new Error('Nothing to export — this mosaic has no tiles.')
 
   const canvas = document.createElement('canvas')
@@ -148,8 +153,10 @@ export async function renderMosaicGif(options: MosaicGifOptions): Promise<Uint8A
      * exactly as it does on the canvas.
      */
     if (frame.background) {
-      ctx.fillStyle = frame.background
+      ctx.fillStyle = styleOf(ctx, frame.background, box)
+      ctx.globalAlpha = paintAlpha(frame.background)
       ctx.fillRect(box.x, box.y, box.width, box.height)
+      ctx.globalAlpha = 1
     }
 
     for (const tile of object.tiles) {
@@ -159,10 +166,12 @@ export async function renderMosaicGif(options: MosaicGifOptions): Promise<Uint8A
       const fill = frame.tileColours[tile.id] ?? null
       if (fill) {
         const rect = layout.visible
-        ctx.fillStyle = fill
+        ctx.fillStyle = styleOf(ctx, fill, rect)
+        ctx.globalAlpha = paintAlpha(fill)
         ctx.beginPath()
         roundedRect(ctx, rect, fitRadius(frame.corners.tileRadius, rect.width, rect.height))
         ctx.fill()
+        ctx.globalAlpha = 1
       }
 
       const char = frame.chars[tile.id]
@@ -179,8 +188,10 @@ export async function renderMosaicGif(options: MosaicGifOptions): Promise<Uint8A
       ctx.translate(rect.x, rect.y)
       ctx.scale(rect.width / reference.width, rect.height / reference.height)
       ctx.translate(-reference.x, -reference.y)
-      ctx.fillStyle = frame.glyphColours[tile.id] ?? DEFAULT_GLYPH_COLOUR
+      ctx.fillStyle = styleOf(ctx, frame.glyphColours[tile.id] ?? DEFAULT_GLYPH_COLOUR, reference)
+      ctx.globalAlpha = paintAlpha(frame.glyphColours[tile.id])
       ctx.fill(outline, 'nonzero')
+      ctx.globalAlpha = 1
       ctx.restore()
     }
 
@@ -208,7 +219,7 @@ export async function renderMosaicGif(options: MosaicGifOptions): Promise<Uint8A
       ctx.beginPath()
       roundedRect(ctx, band.box, band.radius)
       ctx.lineWidth = frame.stroke.width
-      ctx.strokeStyle = frame.stroke.colour
+      ctx.strokeStyle = styleOf(ctx, frame.stroke.colour, band.box)
       ctx.setLineDash(dashArrayFor(frame.stroke) ?? [])
       ctx.stroke()
       ctx.setLineDash([])

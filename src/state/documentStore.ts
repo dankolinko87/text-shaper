@@ -1,3 +1,6 @@
+import { collectAssetIds, samePaint } from '../typography/paint'
+import type { ImageAsset, ImageCrop, Paint } from '../types/paint'
+import { cropObjectOf, cropPaintFor, type CropTarget } from './cropModel'
 import { create } from 'zustand'
 
 import { copyOutline, sameTopology, transformOutline } from '../geometry/outline'
@@ -16,7 +19,7 @@ import type { FrameMember, MemberValues } from '../types/frame'
 import { FRAME_MAX_STATES, FRAME_MIN_STATES } from '../types/frame'
 import { sameStroke } from '../geometry/stroke'
 import { compose } from '../geometry/transform'
-import type {
+import type { AppearanceSettings,
   MeshBackdrop,
   ColorValue,
   DocumentObject,
@@ -300,7 +303,7 @@ export interface DocumentState {
     id: string,
     stateIndex: number,
     leafIds: readonly string[],
-    colour: string,
+    colour: Paint,
   ) => void
   /**
    * The colour behind the named tiles, in one state. Null clears it.
@@ -312,7 +315,7 @@ export interface DocumentState {
     id: string,
     stateIndex: number,
     leafIds: readonly string[],
-    colour: string | null,
+    colour: Paint | null,
   ) => void
   /**
    * The colour behind the WHOLE mosaic, in one state. Null clears it.
@@ -321,7 +324,7 @@ export interface DocumentState {
    * between tiles, which no tile owns. Null means no backdrop was authored — the
    * same distinction a tile background makes, and for the same reason.
    */
-  setMosaicBackground: (id: string, stateIndex: number, colour: string | null) => void
+  setMosaicBackground: (id: string, stateIndex: number, colour: Paint | null) => void
   /**
    * The border on one state's silhouette; null removes it.
    *
@@ -410,9 +413,9 @@ export interface DocumentState {
    * Per state, so it animates like any other colour — and set on that state
    * alone, the rule every other frame edit follows.
    */
-  setFrameStateBackground: (id: string, index: number, background: ColorValue | null) => void
+  setFrameStateBackground: (id: string, index: number, background: Paint | null) => void
   /** The backdrop of every state of any object with states, at once. */
-  setStatedBackground: (id: string, background: ColorValue | null) => void
+  setStatedBackground: (id: string, background: Paint | null) => void
   /** Move a state to another slot. False when nothing changed. */
   moveFrameState: (id: string, from: number, to: number) => boolean
   /**
@@ -674,7 +677,22 @@ export interface DocumentState {
    * have been deleted — a clipboard of ids would paste nothing exactly when it
    * was most wanted.
    */
-  pasteObjects: (sources: readonly DocumentObject[]) => string[]
+  pasteObjects: (sources: readonly DocumentObject[], assets?: Readonly<Record<string, ImageAsset>>) => string[]
+  /**
+   * Part of a shape's appearance, onto the object — or, inside a frame, onto
+   * the shown state's patch for the member, and only the field given.
+   */
+  setAppearancePatch: (
+    id: string,
+    patch: Partial<AppearanceSettings>,
+    member?: { frameId: string; memberId: string; at: number },
+  ) => void
+  /** Change the crop of the picture a target holds, through `change`; nothing if it holds no picture. */
+  editPaintCrop: (target: CropTarget, change: (crop: ImageCrop) => ImageCrop) => void
+  /** Keep a picture, by its content id; the same picture twice is one asset. Returns the id. */
+  addAsset: (asset: ImageAsset) => string
+  /** Drop every picture nothing refers to any more. */
+  sweepAssets: () => void
   reorderObject: (id: string, toIndex: number) => void
   renameObject: (id: string, name: string) => void
   setVisible: (id: string, visible: boolean) => void
@@ -988,7 +1006,7 @@ export const useDocumentStore = create<DocumentState>()((set, get) => {
     stateIndex: number,
     leafIds: readonly string[],
     key: 'glyphColour' | 'tileColour',
-    colour: string | null,
+    colour: Paint | null,
   ): void {
     if (leafIds.length === 0) return
     mutate((doc) => {
@@ -1009,8 +1027,8 @@ export const useDocumentStore = create<DocumentState>()((set, get) => {
        * A tile with no entry reads as `null`, which is the same answer clearing
        * gives — so clearing something that was never coloured is a no-op too.
        */
-      const current = state[key] as Record<string, string | null>
-      const changed = wanted.filter((leaf) => (current[leaf] ?? null) !== colour)
+      const current = state[key] as Record<string, Paint | null>
+      const changed = wanted.filter((leaf) => !samePaint(current[leaf] ?? null, colour))
       if (changed.length === 0) return doc
 
       /*
@@ -1789,7 +1807,7 @@ export const useDocumentStore = create<DocumentState>()((set, get) => {
 
           // Landing back where it started is not a change, and must not leave an
           // undo entry — the same rule the tile colours follow.
-          if ((state.background ?? null) === colour) return object
+          if (samePaint(state.background ?? null, colour)) return object
 
           const states = tiledStates(object)
           // Carried forward through the states that are still copies of this one,
@@ -2278,7 +2296,7 @@ export const useDocumentStore = create<DocumentState>()((set, get) => {
       mutate((doc) =>
         editObject(doc, id, (object) => {
           if (!isStated(object)) return object
-          if (object.states.every((state) => (state.background ?? null) === background)) return object
+          if (object.states.every((state) => samePaint(state.background ?? null, background))) return object
           const states = object.states.map((state) => ({ ...state, background }))
           return { ...object, states } as typeof object
         }),
@@ -2291,7 +2309,7 @@ export const useDocumentStore = create<DocumentState>()((set, get) => {
         if (!object || object.kind !== 'frame') return doc
         const at = object.states[index] ? index : 0
         const state = object.states[at]
-        if (!state || (state.background ?? null) === background) return doc
+        if (!state || samePaint(state.background ?? null, background)) return doc
 
         // To this state and no other, the rule a member's values follow.
         const states = [...object.states]
@@ -3154,7 +3172,17 @@ export const useDocumentStore = create<DocumentState>()((set, get) => {
       )
     },
 
-    pasteObjects(sources) {
+    pasteObjects(sources, assets = {}) {
+      // The pictures first, so the pasted paints have something to name.
+      const wanted = collectAssetIds(sources)
+      mutate((doc) => {
+        let next = doc.assets
+        for (const id of wanted) {
+          const asset = assets[id]
+          if (asset && !next[id]) next = { ...next, [id]: asset }
+        }
+        return next === doc.assets ? doc : { ...doc, assets: next }
+      })
       /*
        * Named as they were, not "copy".
        *
@@ -3289,6 +3317,71 @@ export const useDocumentStore = create<DocumentState>()((set, get) => {
         future: [],
         baseline: { doc, selection: [] },
         warnings: {},
+      })
+    },
+
+    setAppearancePatch(id, patch, member) {
+      if (member) {
+        get().setMemberValues(member.frameId, member.at, member.memberId, { appearance: patch })
+        return
+      }
+      const object = objectById(get().doc, id)
+      if (!object || object.kind !== 'typography') return
+      get().updateObject(id, { appearance: { ...object.appearance, ...patch } })
+    },
+
+    editPaintCrop(target, change) {
+      const object = cropObjectOf(get().doc, target)
+      if (!object) return
+      const cropped = (paint: Paint | null | undefined): Paint | null | undefined =>
+        paint && typeof paint === 'object' && paint.kind === 'image' ? { ...paint, crop: change(paint.crop) } : paint
+      if (object.kind === 'typography') {
+        const current = cropPaintFor(get().doc, target)
+        if (!current) return
+        const next = cropped(current) as Paint
+        const member = target.member ? { ...target.member, at: target.stateIndex } : undefined
+        if (target.surface === 'text') get().setAppearancePatch(object.id, { textFill: next }, member)
+        else if (target.surface === 'shape') get().setAppearancePatch(object.id, { containerFill: next }, member)
+        else if (target.surface === 'banner') get().setAppearancePatch(object.id, { lineFill: next }, member)
+        return
+      }
+      if (target.surface === 'background') {
+        const held = object.states[target.stateIndex] ?? object.states[0]
+        const next = cropped(held?.background)
+        if (!next || typeof next !== 'object' || next.kind !== 'image') return
+        if (object.kind === 'frame') get().setFrameStateBackground(object.id, target.stateIndex, next)
+        else get().setMosaicBackground(object.id, target.stateIndex, next)
+        return
+      }
+      if (object.kind === 'frame') return
+      const state = object.states[target.stateIndex] ?? object.states[0]
+      if (!state) return
+      for (const leaf of target.leafIds ?? []) {
+        if (target.surface === 'tile') {
+          const next = cropped(state.tileColour[leaf])
+          if (next && typeof next === 'object' && next.kind === 'image') get().setMosaicTileColour(object.id, target.stateIndex, [leaf], next)
+        } else if (target.surface === 'glyph') {
+          const next = cropped(state.glyphColour[leaf])
+          if (next && typeof next === 'object' && next.kind === 'image') get().setMosaicGlyphColour(object.id, target.stateIndex, [leaf], next)
+        }
+      }
+    },
+
+    addAsset(asset) {
+      mutate((doc) => (doc.assets[asset.id] ? doc : { ...doc, assets: { ...doc.assets, [asset.id]: asset } }))
+      return asset.id
+    },
+
+    sweepAssets() {
+      mutate((doc) => {
+        const wanted = collectAssetIds(Object.values(doc.objects))
+        const kept: Record<string, ImageAsset> = {}
+        let dropped = false
+        for (const [id, asset] of Object.entries(doc.assets)) {
+          if (wanted.has(id)) kept[id] = asset
+          else dropped = true
+        }
+        return dropped ? { ...doc, assets: kept } : doc
       })
     },
 

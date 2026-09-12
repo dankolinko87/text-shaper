@@ -1,3 +1,4 @@
+import type { Paint } from './paint'
 import type { Easing } from '../anim/easing'
 import type { FontSettings, PositionedStroke, Rect } from './document'
 
@@ -171,9 +172,9 @@ export interface MosaicState {
   /** And every horizontal one. */
   y: Record<string, Coordinate>
   /** By tile id. */
-  glyphColour: Record<string, string>
+  glyphColour: Record<string, Paint>
   /** By tile id. Null draws no background at all, which is not the same as white. */
-  tileColour: Record<string, string | null>
+  tileColour: Record<string, Paint | null>
   /**
    * Behind the whole composition, padding and gaps included.
    *
@@ -186,7 +187,7 @@ export interface MosaicState {
    * at all, which is not the same as a transparent one. A backdrop fading OUT is
    * a colour at zero alpha; one that was never chosen is nothing.
    */
-  background: string | null
+  background: Paint | null
   /**
    * The composition's own edge, drawn on the silhouette; null draws none.
    *

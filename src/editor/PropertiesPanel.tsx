@@ -10,7 +10,7 @@ import {
   TypeColour,
 } from "./colourParts";
 import { FramePanel } from "./FramePanel";
-import { ColourChip, Section, StrokeChip } from "./Section";
+import { PaintChip, Section, StrokeChip } from "./Section";
 import { MosaicStatePanel } from "./StateList";
 import { MeshStatePanel } from "./MeshPanel";
 import {
@@ -23,8 +23,6 @@ import { FONTS } from "../fonts/manifest";
 import { typographyById, useDocumentStore } from "../state/documentStore";
 import { useUiStore } from "../state/uiStore";
 import { useSelectedObject } from "./selection";
-import { gradientCss } from "./gradientCss";
-import { gradientStops } from "../typography/colour";
 import { currentTypeSettings, updateShape } from "./memberEdits";
 import {
   MIN_LINE_HEIGHT,
@@ -361,7 +359,7 @@ export function PropertiesPanel({ warnings, autoSizes, lineCounts }: PropertiesP
             */}
             {object.fittingMode !== "path" && (
               <SegmentedControl<"boundary-warp" | "ring">
-                label="Fill"
+                label="Layout"
                 value={object.fittingMode === "ring" ? "ring" : "boundary-warp"}
                 options={[
                   { value: "boundary-warp", label: "Shape" },
@@ -437,7 +435,7 @@ export function PropertiesPanel({ warnings, autoSizes, lineCounts }: PropertiesP
           {object.fittingMode === "ring" || object.fittingMode === "path" ? (
             <Section
               title="Banner"
-              summary={<ColourChip value={object.appearance.lineFill} />}
+              summary={<PaintChip value={object.appearance.lineFill} />}
               open={open.has("banner")}
               onToggle={toggle("banner")}
             >
@@ -449,20 +447,7 @@ export function PropertiesPanel({ warnings, autoSizes, lineCounts }: PropertiesP
           {object.fittingMode !== "path" ? (
             <Section
               title="Shape"
-              summary={
-                <ColourChip
-                  value={
-                    object.animation.shapeColour.effect === 'gradient'
-                      ? gradientCss(
-                          gradientStops(
-                            object.animation.shapeColour.config,
-                            object.appearance.containerFill ?? object.appearance.textFill,
-                          ),
-                        )
-                      : object.appearance.containerFill
-                  }
-                />
-              }
+              summary={<PaintChip value={object.appearance.containerFill} />}
               open={open.has("shape")}
               onToggle={toggle("shape")}
             >

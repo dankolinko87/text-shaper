@@ -7,12 +7,10 @@ import {
   colourEffectById,
   defaultColourConfig,
   formatHex,
-  gradientEnds,
   mixColours,
   paintAt,
   parseHex,
-  samePaint,
-  stopColourAt,
+  sameFillPaint,
   withAlpha,
   type FillPaint,
 } from '../../src/typography/colour'
@@ -32,7 +30,9 @@ const settings = (
 
 /** The colours a paint actually puts on the artwork, first to last. */
 function coloursOf(paint: FillPaint): string[] {
-  return paint.kind === 'solid' ? [paint.colour] : paint.stops.map((stop) => stop.colour)
+  if (paint.kind === 'solid') return [paint.colour]
+  if (paint.kind === 'image') return []
+  return paint.stops.map((stop) => stop.colour)
 }
 
 describe('every colour effect', () => {
@@ -50,19 +50,16 @@ describe('every colour effect', () => {
   it('closes its loop', () => {
     for (const effect of MOVING) {
       const at = (phase: number) => paintAt(settings(effect.id), phase, NEAR_BLACK)
-      expect(samePaint(at(0), at(1)), `${effect.label} does not close its loop`).toBe(true)
+      expect(sameFillPaint(at(0), at(1)), `${effect.label} does not close its loop`).toBe(true)
     }
   })
 
-  it('visibly changes through the loop, once it is asked to move', () => {
+  it('visibly changes through the loop', () => {
     for (const effect of MOVING) {
-      // The gradient is the one effect that is an appearance in its own right,
-      // so it holds still until a motion is chosen. Every other one IS a motion.
-      const config: Record<string, string | number> =
-        effect.id === 'gradient' ? { motion: 'sweep' } : {}
+      // Every effect IS a motion: a gradient is a paint of its own now.
       const seen = new Set(
         [0, 0.2, 0.4, 0.6, 0.8].map((phase) =>
-          JSON.stringify(paintAt(settings(effect.id, config), phase, NEAR_BLACK)),
+          JSON.stringify(paintAt(settings(effect.id), phase, NEAR_BLACK)),
         ),
       )
       expect(seen.size, `${effect.label} does nothing`).toBeGreaterThan(1)
@@ -139,226 +136,8 @@ describe('flicker', () => {
     // A whole number of beats is the entire reason the loop closes.
     for (const beats of [1, 2, 3, 5, 8]) {
       const config = settings('flicker', { beats })
-      expect(samePaint(paintAt(config, 0, NEAR_BLACK), paintAt(config, 1, NEAR_BLACK))).toBe(true)
+      expect(sameFillPaint(paintAt(config, 0, NEAR_BLACK), paintAt(config, 1, NEAR_BLACK))).toBe(true)
     }
-  })
-})
-
-/** The blend fraction at a point of the box, as the painters compute it. */
-function blendAt(paint: FillPaint, x: number, y: number): number {
-  if (paint.kind !== 'gradient') return 0
-  if (paint.shape === 'radial') {
-    const away = Math.hypot(x - paint.centre.x, y - paint.centre.y)
-    return Math.min(1, away / Math.max(1e-6, paint.radius * Math.SQRT1_2))
-  }
-  const e = gradientEnds(paint.angle, paint.offset, paint.spread)
-  const dx = e.x2 - e.x1
-  const dy = e.y2 - e.y1
-  const length = dx * dx + dy * dy || 1
-  return Math.min(1, Math.max(0, ((x - e.x1) * dx + (y - e.y1) * dy) / length))
-}
-
-describe('the gradient', () => {
-  it('describes its stops rather than resolving one colour', () => {
-    // The editor and the GIF encoder each build their own kind of paint from
-    // this. Resolving it here would leave them free to disagree.
-    const paint = paintAt(settings('gradient'), 0.25, NEAR_BLACK)
-    expect(paint.kind).toBe('gradient')
-    if (paint.kind !== 'gradient') return
-    expect(paint.stops).toEqual([
-      { at: 0, colour: NEAR_BLACK },
-      { at: 1, colour: WARM },
-    ])
-  })
-
-  it('starts a fresh gradient on the artwork’s own colour, whatever the base', () => {
-    const config = defaultColourConfig('gradient', '#336699')
-    expect((config['stops'] as { colour: string }[])[0]?.colour).toBe('#336699')
-    // A copy per object: the descriptor's own list is never handed out.
-    expect(config['stops']).not.toBe(defaultColourConfig('gradient', '#336699')['stops'])
-  })
-
-  it('blends through every stop in order, along the axis', () => {
-    const stops = [
-      { at: 0, colour: '#000000' },
-      { at: 0.5, colour: '#ff0000' },
-      { at: 1, colour: '#ffffff' },
-    ]
-    const paint = paintAt(settings('gradient', { stops, angle: 0 }), 0, NEAR_BLACK)
-    if (paint.kind !== 'gradient') throw new Error('expected a gradient')
-    const at = (x: number) => stopColourAt(paint.stops, blendAt(paint, x, 0.5))
-    expect(at(0)).toBe('#000000')
-    expect(at(0.25)).toBe('#800000')
-    expect(at(0.75)).toBe('#ff8080')
-    expect(at(1)).toBe('#ffffff')
-  })
-
-  it('paints unsorted stops in order, and clamps a stray position', () => {
-    const paint = paintAt(
-      settings('gradient', {
-        stops: [
-          { at: 1.4, colour: '#ffffff' },
-          { at: 0, colour: '#000000' },
-        ],
-      }),
-      0,
-      NEAR_BLACK,
-    )
-    if (paint.kind !== 'gradient') throw new Error('expected a gradient')
-    expect(paint.stops.map((stop) => stop.at)).toEqual([0, 1])
-    expect(paint.stops[0]?.colour).toBe('#000000')
-  })
-
-  it('still paints a config that predates stops as the picture it had', () => {
-    // Between a document loading and its migration, nothing may look wrong.
-    const paint = paintAt({ effect: 'gradient', config: { to: '#00ff00' } }, 0, NEAR_BLACK)
-    if (paint.kind !== 'gradient') throw new Error('expected a gradient')
-    expect(paint.stops).toEqual([
-      { at: 0, colour: NEAR_BLACK },
-      { at: 1, colour: '#00ff00' },
-    ])
-  })
-
-  it('keeps the opacity of a stop, and of a cycle’s second colour', () => {
-    const faded = paintAt(
-      settings('gradient', {
-        stops: [
-          { at: 0, colour: '#000000' },
-          { at: 1, colour: '#e0552f80' },
-        ],
-      }),
-      0,
-      NEAR_BLACK,
-    )
-    expect(coloursOf(faded)[1]).toBe('#e0552f80')
-    const cycled = paintAt(settings('cycle', { to: '#e0552f80' }), 0.5, NEAR_BLACK)
-    expect(coloursOf(cycled)[0]).toBe('#e0552f80')
-  })
-
-  it('offers travel only once there is a motion to travel with', () => {
-    const travel = colourEffectById('gradient').controls.find((control) => control.key === 'travel')
-    expect(travel?.when?.({})).toBe(false)
-    expect(travel?.when?.({ motion: 'still' })).toBe(false)
-    expect(travel?.when?.({ motion: 'sweep' })).toBe(true)
-  })
-
-  it('is still unless a motion is asked for', () => {
-    // A gradient is an appearance first. Choosing one and setting its angle
-    // should give exactly that and hold it — which used to mean finding a
-    // control called Turns and taking it to zero.
-    for (const shape of ['linear', 'radial']) {
-      const config = settings('gradient', { shape, angle: 45 })
-      for (const phase of [0.25, 0.5, 0.75, 1]) {
-        expect(
-          samePaint(paintAt(config, 0, NEAR_BLACK), paintAt(config, phase, NEAR_BLACK)),
-          `${shape} at ${phase}`,
-        ).toBe(true)
-      }
-    }
-  })
-
-  it('holds the angle it was given, at every angle', () => {
-    // A spin overruled this: the picture came from the phase, so the angle
-    // control did nothing you could see on a moving gradient.
-    for (const angle of [0, 45, 120, 300]) {
-      const paint = paintAt(settings('gradient', { angle }), 0, NEAR_BLACK)
-      expect(paint.kind === 'gradient' && paint.shape === 'linear').toBe(true)
-      if (paint.kind !== 'gradient' || paint.shape !== 'linear') return
-      expect(paint.angle).toBeCloseTo(angle, 9)
-    }
-  })
-
-  it('moves when a motion is asked for, and comes back', () => {
-    for (const shape of ['linear', 'radial']) {
-      for (const motion of ['sweep', 'hover', 'pulse']) {
-        const config = settings('gradient', { shape, motion, travel: 1 })
-        const start = paintAt(config, 0, NEAR_BLACK)
-        // It really moves...
-        const moved = [0.25, 0.5, 0.75].some(
-          (phase) => !samePaint(start, paintAt(config, phase, NEAR_BLACK)),
-        )
-        expect(moved, `${shape}/${motion} never moves`).toBe(true)
-        // ...and the loop closes on the same numbers, not merely the same look.
-        expect(
-          samePaint(start, paintAt(config, 1, NEAR_BLACK)),
-          `${shape}/${motion} does not close`,
-        ).toBe(true)
-      }
-    }
-  })
-
-  it('starts every motion at rest, so switching one on changes nothing yet', () => {
-    // The same rule the cycle follows: phase 0 is the artwork you already had.
-    for (const shape of ['linear', 'radial']) {
-      const still = paintAt(settings('gradient', { shape, motion: 'still' }), 0, NEAR_BLACK)
-      for (const motion of ['sweep', 'hover', 'pulse']) {
-        const moving = paintAt(settings('gradient', { shape, motion, travel: 1 }), 0, NEAR_BLACK)
-        expect(samePaint(still, moving), `${shape}/${motion}`).toBe(true)
-      }
-    }
-  })
-
-  it('moves the picture enough to see, whichever motion is chosen', () => {
-    /*
-     * The bug this catches is not "it does nothing" — every motion did
-     * something. It is "it does so little that it reads as doing nothing".
-     *
-     * Hover and pulse shifted the blend by about 6% of the box against side to
-     * side's 23% at the same Travel setting, a quarter as much, and were
-     * reported as broken. Measured as the average change in the blend fraction
-     * across the box, which is what the eye is actually judging.
-     */
-    const grid: [number, number][] = []
-    for (let i = 0; i <= 6; i++) for (let j = 0; j <= 6; j++) grid.push([i / 6, j / 6])
-
-    for (const shape of ['linear', 'radial']) {
-      for (const motion of ['sweep', 'hover', 'pulse']) {
-        const config = { shape, motion, travel: 0.5, angle: 0 }
-        const at = (phase: number) => paintAt(settings('gradient', config), phase, NEAR_BLACK)
-        const base = grid.map(([x, y]) => blendAt(at(0), x, y))
-
-        let strongest = 0
-        for (const phase of [0.2, 0.4, 0.6, 0.8]) {
-          const now = at(phase)
-          const mean =
-            grid.reduce((sum, [x, y], i) => sum + Math.abs(blendAt(now, x, y) - (base[i] ?? 0)), 0) /
-            grid.length
-          strongest = Math.max(strongest, mean)
-        }
-        expect(strongest, `${shape}/${motion} shifts only ${(strongest * 100).toFixed(0)}%`).toBeGreaterThan(0.08)
-      }
-    }
-  })
-
-  it('offers a radial shape, centred and reaching out', () => {
-    const paint = paintAt(settings('gradient', { shape: 'radial' }), 0, NEAR_BLACK)
-    expect(paint.kind === 'gradient' && paint.shape === 'radial').toBe(true)
-    if (paint.kind !== 'gradient' || paint.shape !== 'radial') return
-    expect(paint.centre.x).toBeCloseTo(0.5, 9)
-    expect(paint.centre.y).toBeCloseTo(0.5, 9)
-    expect(paint.radius).toBeGreaterThan(0)
-  })
-
-  it('spans the box it is given, corner to corner', () => {
-    // Both ends must reach past the middle, or a diagonal gradient runs out of
-    // colour before it reaches the corners.
-    const flat = gradientEnds(0)
-    expect(flat.x1).toBeCloseTo(0, 9)
-    expect(flat.x2).toBeCloseTo(1, 9)
-    expect(flat.y1).toBeCloseTo(0.5, 9)
-
-    const diagonal = gradientEnds(45)
-    expect(diagonal.x1).toBeLessThan(0.5)
-    expect(diagonal.y1).toBeLessThan(0.5)
-    expect(diagonal.x2).toBeGreaterThan(0.5)
-    expect(diagonal.y2).toBeGreaterThan(0.5)
-  })
-
-  it('turns the same way for every angle', () => {
-    const a = gradientEnds(90)
-    expect(a.y2).toBeGreaterThan(a.y1)
-    const b = gradientEnds(270)
-    expect(b.y2).toBeLessThan(b.y1)
   })
 })
 

@@ -1,7 +1,6 @@
 import {
   Canvas,
   FixedLayout,
-  Gradient,
   Group,
   LayoutManager,
   Path,
@@ -20,11 +19,11 @@ import { inkBoxIn, placeInk } from '../mosaic/glyphFit'
 import { fittedRadius, glyphReferenceRects } from './mosaicPlayback'
 import { layoutMosaic } from '../mosaic/layout'
 
-import { gradientEnds, paintAt, radialEnds, withAlpha, type FillPaint } from '../typography/colour'
+import { paintAt, type FillPaint } from '../typography/colour'
 import type { RibbonSlice } from '../typography/frame'
 import type { SequenceFrame } from '../typography/objectFit'
 import { decompose } from '../geometry/transform'
-import type { FontSettings, Stated } from '../types/document'
+import type { Rect, FontSettings, Stated } from '../types/document'
 import type { Mat2D } from '../types/geometry'
 import type {
   DocumentObject,
@@ -40,6 +39,10 @@ import { isStated, opacityOf } from '../types/document'
 import { buildMeshGroup, meshContentKey } from './meshRender'
 import { selectionColour } from './colours'
 import { emptyGround, groundFor, groundRadius } from './invitations'
+import { applyPaint, boxOfChild, fabricPaint, fillOf, type FillBox } from './paintFill'
+import { imageReady } from './imageCache'
+import { collectAssetIds, fadedPaint, paintKey as storedPaintKey, resolvePaint } from '../typography/paint'
+import type { Paint, StrokePaint } from '../types/paint'
 import { memberAtState, valuesFor } from '../frame/frame'
 import { mosaicClip, strokeChild, strokeRect } from './strokePaint'
 import { dashArrayFor, strokePaint } from '../geometry/stroke'
@@ -113,24 +116,7 @@ export interface RenderedObject {
  * GIF encoder measures against. Pixel units would need the path's offset, which
  * the animation loop deliberately leaves stale as it swaps path data in place.
  */
-export function fabricPaint(paint: FillPaint): string | Gradient<'linear'> | Gradient<'radial'> {
-  if (paint.kind === 'solid') return paint.colour
-  const colorStops = paint.stops.map((stop) => ({ offset: stop.at, color: stop.colour }))
-  if (paint.shape === 'radial') {
-    return new Gradient({
-      type: 'radial',
-      gradientUnits: 'percentage',
-      coords: radialEnds(paint.centre, paint.radius),
-      colorStops,
-    })
-  }
-  return new Gradient({
-    type: 'linear',
-    gradientUnits: 'percentage',
-    coords: gradientEnds(paint.angle, paint.offset, paint.spread),
-    colorStops,
-  })
-}
+export { fabricPaint } from './paintFill'
 
 /**
  * The artwork's fills AT REST.
@@ -149,9 +135,7 @@ export function restingPaints(object: TypographyObject): {
     container: object.appearance.containerFill
       ? paintAt(object.animation.shapeColour, 0, object.appearance.containerFill)
       : null,
-    line: object.appearance.lineFill
-      ? { kind: 'solid', colour: object.appearance.lineFill }
-      : null,
+    line: resolvePaint(object.appearance.lineFill, 0),
   }
 }
 
@@ -159,6 +143,11 @@ export function restingPaints(object: TypographyObject): {
 function paintKey(paint: FillPaint | null): string {
   if (!paint) return 'none'
   if (paint.kind === 'solid') return paint.colour
+  if (paint.kind === 'image') {
+    // Whether the picture has ARRIVED, not just which one it is — a group built
+    // while it was still decoding has to be built again once it can draw.
+    return `image:${paint.asset}:${imageReady(paint.asset) ? 'ready' : 'pending'}@${round(paint.crop.scale)},${round(paint.crop.x)},${round(paint.crop.y)}/${round(paint.opacity)}`
+  }
   const blend = paint.stops.map((stop) => `${round(stop.at)}:${stop.colour}`).join('>')
   return paint.shape === 'radial'
     ? `radial:${blend}@${round(paint.centre.x)},${round(paint.centre.y)}/${round(paint.radius)}`
@@ -256,7 +245,7 @@ function buildGroup(
   const border = object.appearance.containerStroke
   const bare = fill === null && border === null
   const container = new Path(object.currentSourcePath, {
-    fill: fill ? fabricPaint(fill) : 'transparent',
+    fill: 'transparent',
     stroke: bare ? SHAPE_PLACEHOLDER_STROKE : undefined,
     strokeWidth: bare ? 1 : 0,
     // A UI hint, so it stays one pixel at any zoom. The real border does the
@@ -267,6 +256,7 @@ function buildGroup(
   // `nonzero` is what keeps counters and holes open.
   container.fillRule = 'nonzero'
   container.set('role', 'container')
+  applyPaint(container, fill, boxOfChild(container))
   children.push(container)
 
   /*
@@ -313,22 +303,22 @@ function buildGroup(
     for (const slice of ribbon) {
       if (slice.band.length > 0) {
         const band = new Path(slice.band, {
-          fill: fabricPaint(inked),
           strokeWidth: 0,
           objectCaching: false,
         })
         band.fillRule = 'nonzero'
         band.set('role', 'band')
+        applyPaint(band, inked, boxOfChild(band))
         children.push(band)
       }
       if (slice.text.length > 0) {
         const words = new Path(slice.text, {
-          fill: fabricPaint(paints.text),
           strokeWidth: 0,
           objectCaching: false,
         })
         words.fillRule = 'nonzero'
         words.set('role', 'text')
+        applyPaint(words, paints.text, boxOfChild(words))
         children.push(words)
       }
     }
@@ -338,23 +328,23 @@ function buildGroup(
 
   if (bandPath.length > 0 && inked) {
     const band = new Path(bandPath, {
-      fill: fabricPaint(inked),
       strokeWidth: 0,
       objectCaching: false,
     })
     band.fillRule = 'nonzero'
     band.set('role', 'band')
+    applyPaint(band, inked, boxOfChild(band))
     children.push(band)
   }
 
   if (hasText) {
     const glyphs = new Path(textPath, {
-      fill: fabricPaint(paints.text),
       strokeWidth: 0,
       objectCaching: false,
     })
     glyphs.fillRule = 'nonzero'
     glyphs.set('role', 'text')
+    applyPaint(glyphs, paints.text, boxOfChild(glyphs))
     children.push(glyphs)
   }
 
@@ -556,20 +546,24 @@ export function paintFrame(
     for (let i = 0; i < slices.length; i++) {
       const pair = slices[i] as { band: Path; text: Path }
       const next = frame.ribbon[i] as SequenceFrame['ribbon'][number]
-      pair.band.set({ path: new Path(next.band).path, fill: fabricPaint(frame.bandFill) })
+      pair.band.set({ path: new Path(next.band).path })
+      applyPaint(pair.band, frame.bandFill, boxOfChild(pair.band))
       pair.band.setCoords()
-      pair.text.set({ path: new Path(next.text).path, fill: fabricPaint(frame.textFill) })
+      pair.text.set({ path: new Path(next.text).path })
+      applyPaint(pair.text, frame.textFill, boxOfChild(pair.text))
       pair.text.setCoords()
     }
   } else {
     const text = children.find((child) => child.get('role') === 'text')
     if (text) {
-      text.set({ path: new Path(frame.path).path, fill: fabricPaint(frame.textFill) })
+      text.set({ path: new Path(frame.path).path })
+      applyPaint(text, frame.textFill, boxOfChild(text))
       text.setCoords()
     }
     const band = children.find((child) => child.get('role') === 'band')
     if (band && frame.bandPath && frame.bandFill) {
-      band.set({ path: new Path(frame.bandPath).path, fill: fabricPaint(frame.bandFill) })
+      band.set({ path: new Path(frame.bandPath).path })
+      applyPaint(band, frame.bandFill, boxOfChild(band))
       band.setCoords()
     }
   }
@@ -577,10 +571,9 @@ export function paintFrame(
   // The container's own preset, if it has one. This is the same outline the type
   // was just drawn through, so the two cannot drift apart.
   if (container && rest) {
-    container.set({
-      path: frame.shapePath ? new Path(frame.shapePath).path : rest.path,
-      fill: frame.shapeFill ? fabricPaint(frame.shapeFill) : rest.fill,
-    })
+    container.set({ path: frame.shapePath ? new Path(frame.shapePath).path : rest.path })
+    if (frame.shapeFill) applyPaint(container, frame.shapeFill, boxOfChild(container))
+    else container.set({ fill: rest.fill, opacity: 1 })
     container.setCoords()
   }
 }
@@ -661,7 +654,7 @@ function strokeKey(stroke: Stroke | PositionedStroke | null): string {
   if (!stroke) return 'none'
   const dash = stroke.dash ? `${stroke.dash.length}/${stroke.dash.gap}` : 'solid'
   const position = 'position' in stroke ? stroke.position : 'in'
-  return `${stroke.colour}:${stroke.width}:${position}:${dash}`
+  return `${storedPaintKey(stroke.colour)}:${stroke.width}:${position}:${dash}`
 }
 
 function typographyContentKey(
@@ -850,7 +843,8 @@ function buildMosaicGroup(
       originY: 'center',
       // `transparent` rather than a fully faded colour: there is no colour here
       // to fade, and inventing one would be a value nobody authored.
-      fill: background ?? 'transparent',
+      fill: fillOf(background, 'transparent', { size: tile.visible }),
+      opacity: imageOpacity(background),
       strokeWidth: 0,
       objectCaching: false,
       evented: false,
@@ -922,7 +916,8 @@ function buildMosaicGroup(
         const box = inkBoxIn(font.fontId, char, reference)
         const placed = placeInk(box, reference, tile.glyph)
         const glyph = new Path(data, {
-          fill: state?.glyphColour[leaf.id] ?? DEFAULT_GLYPH_COLOUR,
+          fill: fillOf(state?.glyphColour[leaf.id] ?? DEFAULT_GLYPH_COLOUR, 'transparent', glyphBox(reference, box)),
+          opacity: imageOpacity(state?.glyphColour[leaf.id]),
           strokeWidth: 0,
           objectCaching: false,
           originX: 'center',
@@ -973,7 +968,8 @@ function buildMosaicGroup(
     height: object.localBounds.height,
     originX: 'center',
     originY: 'center',
-    fill: backdrop ?? ground ?? 'transparent',
+    fill: fillOf(backdrop, ground ?? 'transparent', { size: object.localBounds }),
+    opacity: imageOpacity(backdrop),
     rx: rounding,
     ry: rounding,
     strokeWidth: 0,
@@ -1082,16 +1078,17 @@ export function paintMemberArtwork(
   if (!group.getObjects) return
 
   // Everything that decides the picture, so a hold costs one string compare.
-  const mark = `${stateIndex}|${phase}|${drawn.typography.padding}|${drawn.currentSourcePath}|${drawn.appearance.containerFill}`
+  const mark = `${stateIndex}|${phase}|${drawn.typography.padding}|${drawn.currentSourcePath}|${JSON.stringify(drawn.appearance)}`
   if (group.get('paintedAs') === mark) return
   group.set('paintedAs', mark)
 
   paintMemberBorder(group, drawn)
 
   const paints = restingPaints(drawn)
+  const restPath = new Path(drawn.currentSourcePath)
   const rest = {
-    path: new Path(drawn.currentSourcePath).path,
-    fill: paints.container ? fabricPaint(paints.container) : 'transparent',
+    path: restPath.path,
+    fill: paints.container ? fabricPaint(paints.container, boxOfChild(restPath)) : 'transparent',
   }
 
   /*
@@ -1137,14 +1134,29 @@ export function paintMemberArtwork(
  * everything else in the loop, so a colour that fades in does so smoothly
  * rather than arriving when the group is next rebuilt.
  */
-export function paintFrameBackground(group: Group, colour: string | null): void {
+export function paintFrameBackground(group: Group, colour: Paint | null): void {
   for (const part of group.getObjects()) {
     if (part.get('role') !== 'plate') continue
-    const next = colour ?? (part.get('restFill') as string | undefined) ?? 'transparent'
-    if (part.fill === next) return
-    part.set({ fill: next })
+    const next = fillOf(colour, (part.get('restFill') as string | undefined) ?? 'transparent', boxOfChild(part))
+    const opacity = imageOpacity(colour)
+    if (part.fill === next && part.opacity === opacity) continue
+    part.set({ fill: next, opacity })
     part.set('dirty', true)
   }
+}
+
+/** The opacity a paint gives its child: a picture's own, or full. */
+export function imageOpacity(paint: Paint | null | undefined): number {
+  return paint && typeof paint === 'object' && paint.kind === 'image' ? (paint.opacity ?? 1) : 1
+}
+
+/**
+ * The box a letter's picture is placed in: the reference rectangle it was
+ * cut for, which its ink box sits inside — so a picture covers the tile's
+ * letter box rather than the ink alone, and stays put as the letter changes.
+ */
+export function glyphBox(reference: Rect, inkBox: Rect): FillBox {
+  return { size: reference, offset: { x: reference.x - inkBox.x, y: reference.y - inkBox.y } }
 }
 
 /** The outline and its fill, for a member with no type to emit through it. */
@@ -1220,7 +1232,7 @@ export function memberAsDrawn(
    */
   const appearance =
     values.appearance.containerStroke === null && everStroked
-      ? { ...values.appearance, containerStroke: { ...everStroked, colour: withAlpha(everStroked.colour, 0) } }
+      ? { ...values.appearance, containerStroke: { ...everStroked, colour: fadedPaint(everStroked.colour) as StrokePaint } }
       : values.appearance
 
   // Everything else — the state's shape, its place, its cut-tier settings, the
@@ -1449,7 +1461,11 @@ function statedContentKey(object: Stated, at: number, input: SyncInput): string 
         ? meshContentKey(object, at)
         : frameContentKey(object, at, input)
   // The ground is drawn or it is not, and only the plate's arrival changes which.
-  return `${own}~ground:${groundFor(object, input.held) ?? ''}`
+  // And whether each picture the object refers to has ARRIVED: a group built
+  // while one was still decoding draws nothing there, and has to be built
+  // again once it can.
+  const pictures = [...collectAssetIds([object])].map((id) => `${id}:${imageReady(id) ? 1 : 0}`).join(',')
+  return `${own}~ground:${groundFor(object, input.held) ?? ''}~pictures:${pictures}`
 }
 
 /**
@@ -1590,7 +1606,8 @@ function buildFrameGroup(
      * plate — the rectangle that was already there to make an empty frame
      * visible and to measure the clip against.
      */
-    fill: state?.background ?? ground ?? 'transparent',
+    fill: fillOf(state?.background, ground ?? 'transparent', { size: object.localBounds }),
+    opacity: imageOpacity(state?.background),
     rx: rounding,
     ry: rounding,
     strokeWidth: 0,

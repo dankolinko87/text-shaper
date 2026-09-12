@@ -155,5 +155,6 @@ export function createEmptyDocument(name = 'Untitled'): TextShaperDocument {
     objects: {},
     objectOrder: [],
     defaults: documentDefaults,
+    assets: {},
   }
 }

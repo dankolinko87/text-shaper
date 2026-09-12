@@ -1,3 +1,5 @@
+import type { ImageAsset } from '../types/paint'
+import type { CropTarget } from './cropModel'
 import { readTheme, type Theme } from './theme'
 import { create } from 'zustand'
 
@@ -121,6 +123,13 @@ export interface UiState {
    */
   interacting: string | null
   /**
+   * Moves when a picture has been decoded, so the canvas syncs again and the
+   * group that was waiting for it is rebuilt with it.
+   */
+  imageRevision: number
+  /** The picture fill being cropped on the canvas, if any. */
+  croppingPaint: CropTarget | null
+  /**
    * The mosaic tile the caret is in, if any.
    *
    * Both halves, because a leaf id alone would not say which object it belongs
@@ -160,6 +169,8 @@ export interface UiState {
    * does, which is what a clipboard is.
    */
   clipboard: DocumentObject[]
+  /** The pictures the clipboard's objects refer to, so a paste into another project brings them. */
+  clipboardAssets: Record<string, ImageAsset>
   fontLoaded: boolean
   clipperReady: boolean
   /**
@@ -192,6 +203,8 @@ export interface UiState {
   setPlaying: (playing: boolean) => void
   setPreviewObject: (id: string | null) => void
   setInteracting: (id: string | null) => void
+  bumpImageRevision: () => void
+  setCroppingPaint: (target: CropTarget | null) => void
   setTyping: (at: { object: string; leaf: string } | null) => void
   setMosaicSelection: (leaves: string[]) => void
   /**
@@ -243,7 +256,7 @@ export interface UiState {
   setZoom: (zoom: number) => void
   setStageSize: (size: { width: number; height: number }) => void
   setDrawing: (drawing: boolean) => void
-  setClipboard: (objects: DocumentObject[]) => void
+  setClipboard: (objects: DocumentObject[], assets?: Record<string, ImageAsset>) => void
   setFontLoaded: (loaded: boolean) => void
   setClipperReady: (ready: boolean) => void
 }
@@ -272,6 +285,9 @@ export const useUiStore = create<UiState>()((set, get) => ({
   stageHeight: 0,
   isDrawing: false,
   clipboard: [],
+  clipboardAssets: {},
+  imageRevision: 0,
+  croppingPaint: null,
   fontLoaded: false,
   clipperReady: false,
   viewportAdjusted: false,
@@ -293,9 +309,9 @@ export const useUiStore = create<UiState>()((set, get) => ({
    */
   setTool: (tool) =>
     set((state) =>
-      tool === 'select' || state.editingPoints === null
+      tool === 'select' || (state.editingPoints === null && state.croppingPaint === null)
         ? { tool }
-        : { tool, editingPoints: null },
+        : { tool, editingPoints: null, croppingPaint: null },
     ),
   // Normalised rather than trusted. Nothing persists the tab, but the store
   // outlives a hot reload, so a session that was sitting on the old 'colour'
@@ -333,6 +349,8 @@ export const useUiStore = create<UiState>()((set, get) => ({
   setPlaying: (playing) => set({ playing }),
   setPreviewObject: (previewObject) => set({ previewObject }),
   setInteracting: (interacting) => set({ interacting }),
+  bumpImageRevision: () => set((state) => ({ imageRevision: state.imageRevision + 1 })),
+  setCroppingPaint: (croppingPaint) => set({ croppingPaint }),
 
   setMosaicState: (object, index) =>
     set((state) => ({
@@ -421,7 +439,7 @@ export const useUiStore = create<UiState>()((set, get) => ({
   setZoom: (zoom) => set({ zoom: clamp(zoom, MIN_ZOOM, MAX_ZOOM) }),
   setStageSize: ({ width, height }) => set({ stageWidth: width, stageHeight: height }),
   setDrawing: (isDrawing) => set({ isDrawing }),
-  setClipboard: (clipboard) => set({ clipboard }),
+  setClipboard: (clipboard, clipboardAssets = {}) => set({ clipboard, clipboardAssets }),
   setFontLoaded: (fontLoaded) => set({ fontLoaded }),
   setClipperReady: (clipperReady) => set({ clipperReady }),
 }))

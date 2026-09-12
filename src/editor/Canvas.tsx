@@ -61,6 +61,9 @@ import { newPaintCache, paintMeshFrame, type MeshPaintCache } from './meshPlayba
 import { evaluateFrameAtTime, frameAuthoredTimeFor, valuesFor } from '../frame/frame'
 import { FrameLayer } from './FrameLayer'
 import { FramePlate } from './FramePlate'
+import { ensureImagesLoaded } from './imageCache'
+import { CropLayer } from './CropLayer'
+import { CropBar } from './CropBar'
 import { memberBoxes } from './frameBoxes'
 import { MeshLayer } from './MeshLayer'
 import { MosaicLayer } from './MosaicLayer'
@@ -168,6 +171,10 @@ export function EditorCanvas() {
   const spread = useUiStore((s) => s.spread)
   const frameSelection = useUiStore((s) => s.frameSelection)
   const { stated } = useSelectedObject()
+  /** Moves when a picture arrives, so the group waiting for it is rebuilt. */
+  const imageRevision = useUiStore((s) => s.imageRevision)
+  const assets = useDocumentStore((s) => s.doc.assets)
+  useEffect(() => ensureImagesLoaded(assets), [assets])
   /**
    * The object the plate stands under: the frame being worked inside, else
    * the selected object with states. The canvas is built from it — an empty
@@ -312,7 +319,9 @@ export function EditorCanvas() {
      * And `held`, for the one thing it changes about the drawing: whether an
      * empty object paints its own ground under the plate.
      */
-  }, [textPaths, bandPaths, ribbons, fits, mosaicStates, insideFrame, spread, held])
+    // And `imageRevision`: a picture that has just been decoded changes what a
+    // group can draw, and nothing in the document changed to say so.
+  }, [textPaths, bandPaths, ribbons, fits, mosaicStates, insideFrame, spread, held, imageRevision])
 
   /* --------------------------------------------------- selection sync */
   useEffect(() => {
@@ -1291,7 +1300,19 @@ export function EditorCanvas() {
       frameSelection.length === 1 &&
       objectsById[insideFrame]?.kind === 'frame',
   )
-  const editing = Boolean(editedObject) || editingMemberPoints
+  /** The picture fill being cropped, and the object it is painted on. */
+  const croppingPaint = useUiStore((s) => s.croppingPaint)
+  const croppingObject = (() => {
+    if (!croppingPaint) return undefined
+    const top = objectsById[croppingPaint.objectId]
+    if (top) return top
+    const frame = croppingPaint.member ? objectsById[croppingPaint.member.frameId] : undefined
+    if (!frame || frame.kind !== 'frame') return undefined
+    const picked = frame.members.find((each) => each.id === croppingPaint.member!.memberId)
+    return picked ? memberAsDrawn(picked, valuesFor(picked, frame.states[croppingPaint.stateIndex])) : undefined
+  })()
+  const cropping = Boolean(croppingObject)
+  const editing = Boolean(editedObject) || editingMemberPoints || cropping
 
   /**
    * The mosaic whose tiles are on show.
@@ -1480,6 +1501,15 @@ export function EditorCanvas() {
         host={editedMemberObject ? memberHost : undefined}
       />
       <PenLayer canvas={fabricRef.current} armed={activeTool === 'pen'} />
+      {/* A picture fill being cropped: the rest of the picture, and the handles to move it. */}
+      <CropLayer
+        canvas={fabricRef.current}
+        target={croppingPaint}
+        object={croppingObject}
+        host={croppingPaint?.member ? memberHost : undefined}
+        textPath={croppingPaint ? textPaths[croppingPaint.objectId] : undefined}
+        bandPath={croppingPaint ? bandPaths[croppingPaint.objectId] : undefined}
+      />
       {/*
         A mosaic's tile edges, and the caret when one is in it. The caret still
         follows what is being TYPED INTO rather than what is selected, so
@@ -1502,6 +1532,7 @@ export function EditorCanvas() {
         even while nothing is selected.
       */}
       <ObjectBar canvas={fabricRef.current} inside={editedMosaic ?? editedMesh} />
+      <CropBar canvas={fabricRef.current} />
       {/* What a press means on a row, for every kind; and the number over each window. */}
       <SpreadLayer canvas={fabricRef.current} object={spreadObject} />
       <SpreadChips canvas={fabricRef.current} object={spreadObject} />

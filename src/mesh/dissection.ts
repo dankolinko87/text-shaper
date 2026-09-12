@@ -1,3 +1,5 @@
+import { samePaint } from '../typography/paint'
+import type { Paint } from '../types/paint'
 import { sameStroke } from '../geometry/stroke'
 import { layoutMosaic } from '../mosaic/layout'
 import type { FontSettings, LetterMosaicObject, Rect, Vec2 } from '../types/document'
@@ -90,15 +92,15 @@ export function sameMeshGeometry(a: MeshState, b: MeshState, tolerance = 1e-9): 
       .join('|')
   if (written(a) !== written(b)) return false
 
-  if ((a.background ?? null) !== (b.background ?? null)) return false
+  if (!samePaint(a.background ?? null, b.background ?? null)) return false
   if (!sameStroke(a.stroke ?? null, b.stroke ?? null, tolerance)) return false
   if (!sameStroke(a.lines ?? null, b.lines ?? null, tolerance)) return false
 
   for (const map of ['glyphColour', 'tileColour'] as const) {
-    const left = a[map] as Record<string, string | null>
-    const right = b[map] as Record<string, string | null>
+    const left = a[map] as Record<string, Paint | null>
+    const right = b[map] as Record<string, Paint | null>
     for (const key of new Set([...Object.keys(left), ...Object.keys(right)])) {
-      if ((left[key] ?? null) !== (right[key] ?? null)) return false
+      if (!samePaint(left[key] ?? null, right[key] ?? null)) return false
     }
   }
 

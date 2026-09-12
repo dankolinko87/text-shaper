@@ -1,4 +1,5 @@
 import { dashArrayFor, strokePaint } from '../geometry/stroke'
+import { styleOf } from './paintStyle'
 import type { PositionedStroke, Rect, Stroke } from '../types/document'
 
 /**
@@ -46,7 +47,7 @@ export function strokeOnContext(
   const dash = dashArrayFor(stroke)
   ctx.setLineDash(dash ?? [])
   ctx.lineWidth = width
-  ctx.strokeStyle = stroke.colour
+  ctx.strokeStyle = styleOf(ctx, stroke.colour, frame)
   ctx.stroke(path)
 
   ctx.restore()

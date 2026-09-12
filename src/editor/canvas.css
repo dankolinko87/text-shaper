@@ -201,3 +201,64 @@
 .frame-empty__hint {
   font-size: var(--text-sm);
 }
+
+/* ---------------------------------------------------------------- crop bar */
+
+/* Under the picture being cropped: the same deep green pill as every bar on the canvas. */
+.crop-bar {
+  --pill-bg: var(--selection-deep);
+  --pill-edge: rgba(255, 255, 255, 0.14);
+  position: absolute;
+  translate: -50% 0;
+  z-index: var(--z-canvas-bar);
+}
+
+/* Roomier than the pill's own edges: a label and a slider want air, a row of icons does not. */
+.crop-bar.pill {
+  gap: var(--space-4);
+  padding: 0 var(--space-4) 0 var(--space-5);
+}
+
+.crop-bar__label {
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+/*
+ * A white thumb on a translucent white track, so the slider reads on the
+ * green. Each pseudo in a rule of its own, as the picker's sliders are: a
+ * browser drops a whole rule when any selector in it names a pseudo it does
+ * not know.
+ */
+input[type='range'].crop-bar__zoom {
+  flex: none;
+  width: 140px;
+  height: 20px;
+}
+input[type='range'].crop-bar__zoom::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: var(--radius-full);
+  background: rgba(255, 255, 255, 0.35);
+}
+input[type='range'].crop-bar__zoom::-moz-range-track {
+  height: 4px;
+  border-radius: var(--radius-full);
+  background: rgba(255, 255, 255, 0.35);
+}
+input[type='range'].crop-bar__zoom::-webkit-slider-thumb {
+  width: 14px;
+  height: 14px;
+  margin-top: -5px;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+input[type='range'].crop-bar__zoom::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}

@@ -20,6 +20,14 @@
 .topbar__section--end {
   justify-content: flex-end;
 }
+/* The one thing the header says unasked: the work is not being kept. */
+.topbar__unsaved {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--warning, #c2410c);
+  font-size: var(--text-sm);
+}
 /*
  * The mark, which is also the light switch.
  *
@@ -1150,4 +1158,129 @@
 .gradient-field__row > .field {
   flex: 1;
   min-width: 0;
+}
+
+/* ------------------------------------------------------------ paint field */
+
+/*
+ * One control for any fill: the row a colour field has — swatch, what it
+ * is, opacity, remove — with the kinds and their settings in the picker the
+ * swatch opens.
+ */
+.paint-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.paint-field[data-disabled='true'] {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+/* What a paint is when it is not a hex: "Linear", "Radial", "Image", or the mixed word. */
+.paint-field__kind {
+  flex: 1;
+  padding: 0 var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+/* Off screen rather than hidden: a hidden file input cannot be clicked open. */
+.paint-field__file {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* ----------------------------------------------------------- paint picker */
+
+/* The colour picker's popover, with the tabs on top and a little less air between rows. */
+.paint-picker {
+  gap: var(--space-3);
+}
+
+.paint-picker__tabs {
+  display: flex;
+  gap: var(--space-1);
+  margin: calc(var(--space-2) * -1) 0 0;
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.paint-picker__tab {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 28px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.paint-picker__tab:hover {
+  background: var(--well);
+  color: var(--text-primary);
+}
+
+.paint-picker__tab[aria-selected='true'] {
+  background: var(--well-raised);
+  box-shadow: var(--well-raised-shadow);
+  color: var(--text-primary);
+}
+
+/* The shape and the two quick turns, in one row above the stops. */
+.paint-picker__shape {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.paint-picker__shape .input {
+  flex: 1;
+}
+
+/* The picture as it is, cover-fitted, at the size the colour field shows. */
+.paint-picker__preview {
+  height: 140px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  background-color: var(--well);
+  background-size: cover;
+  background-position: center;
+}
+
+.paint-picker__actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+/* A line between what the gradient is and what it does. */
+.paint-picker__divider {
+  width: 100%;
+  height: 0;
+  margin: 0;
+  border: 0;
+  border-top: 1px solid var(--border-subtle);
+}
+
+/* Which motion, and the minus that takes it away, on one row. */
+.paint-picker__motion {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.paint-picker__motion .input {
+  flex: 1;
+}
+
+.section__chip--image {
+  background-size: cover;
+  background-position: center;
 }

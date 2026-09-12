@@ -4,6 +4,9 @@ import { memberAsFreed } from '../frame/frame'
 import { useDocumentStore } from '../state/documentStore'
 import { useProjectsStore } from '../state/projectsStore'
 import { useUiStore } from '../state/uiStore'
+import { collectAssetIds } from '../typography/paint'
+import type { DocumentObject } from '../types/document'
+import type { ImageAsset } from '../types/paint'
 import { nudgeSelection } from './objectDrag'
 import { openShapeEditingOnSelection } from './shapeEditing'
 
@@ -142,17 +145,17 @@ export function useShortcuts(): void {
               ? frame.members.find((each) => each.id === picked.memberId)
               : undefined
           if (frame?.kind === 'frame' && member) {
-            ui.setClipboard([memberAsFreed(member, frame.states[picked.at], frame.transform)])
+            const freed = [memberAsFreed(member, frame.states[picked.at], frame.transform)]
+            ui.setClipboard(freed, assetsOf(freed))
           }
           return
         }
         if (doc.selection.length === 0) return
         e.preventDefault()
-        ui.setClipboard(
-          doc.selection
-            .map((id) => doc.doc.objects[id])
-            .filter((object): object is NonNullable<typeof object> => Boolean(object)),
-        )
+        const copied = doc.selection
+          .map((id) => doc.doc.objects[id])
+          .filter((object): object is NonNullable<typeof object> => Boolean(object))
+        ui.setClipboard(copied, assetsOf(copied))
         return
       }
 
@@ -166,7 +169,7 @@ export function useShortcuts(): void {
          * on the artboard as any paste does and are then moved in, so rebasing
          * them into the frame's space stays `addToFrame`'s job.
          */
-        const made = doc.pasteObjects(clipboard)
+        const made = doc.pasteObjects(clipboard, ui.clipboardAssets)
         const inside = ui.insideFrame
         if (inside && made.length > 0) doc.addToFrame(inside, made)
         doc.commit('Paste')
@@ -275,6 +278,8 @@ export function useShortcuts(): void {
            * run as well would delete the very object being drawn into.
            */
           if (ui.isDrawing) break
+          // Nor does Delete reach the object under a picture being cropped.
+          if (ui.croppingPaint) break
           /*
            * Inside a frame, Delete means the MEMBER you picked.
            *
@@ -307,6 +312,8 @@ export function useShortcuts(): void {
            * always to move the object you were just editing.
            */
           if (ui.isDrawing) ui.setDrawing(false)
+          // A picture being cropped is one layer in: put the crop down first.
+          else if (ui.croppingPaint) ui.setCroppingPaint(null)
           /*
            * The caret is one layer in from everything below: its own handler
            * takes Escape out of text entry (or out of a drag in flight), and
@@ -353,7 +360,7 @@ export function useShortcuts(): void {
            * mean nothing rather than moving the shape out from under the
            * editor.
            */
-          if (ui.editingPoints) break
+          if (ui.editingPoints || ui.croppingPaint) break
           const step = e.shiftKey ? 10 : 1
           const delta =
             e.key === 'ArrowLeft'
@@ -396,4 +403,12 @@ export function useShortcuts(): void {
       window.removeEventListener('blur', onBlur)
     }
   }, [])
+}
+
+/** The pictures some objects refer to, out of the document, to travel with a copy. */
+function assetsOf(objects: readonly DocumentObject[]): Record<string, ImageAsset> {
+  const all = useDocumentStore.getState().doc.assets
+  const out: Record<string, ImageAsset> = {}
+  for (const id of collectAssetIds(objects)) if (all[id]) out[id] = all[id]
+  return out
 }

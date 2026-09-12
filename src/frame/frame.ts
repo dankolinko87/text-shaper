@@ -5,13 +5,13 @@ import {
   playbackDuration as watchedDuration,
 } from '../anim/timeline'
 import { ease } from '../anim/easing'
-import { blendColour } from '../typography/colour'
+import { blendPaint, samePaint } from '../typography/paint'
+import type { Paint } from '../types/paint'
 import { createId } from '../utils/id'
 import { blendStroke, sameStroke } from '../geometry/stroke'
 import { blendOutline, outlineToPath, sameOutline } from '../geometry/outline'
 import type {
   AppearanceSettings,
-  ColorValue,
   DocumentObject,
   FrameObject,
   Transform2D,
@@ -277,9 +277,9 @@ export function blendAppearance(
   t: number,
 ): AppearanceSettings {
   return {
-    textFill: blendColour(a.textFill, b.textFill, t) ?? a.textFill,
-    containerFill: blendColour(a.containerFill, b.containerFill, t),
-    lineFill: blendColour(a.lineFill, b.lineFill, t),
+    textFill: blendPaint(a.textFill, b.textFill, t) ?? a.textFill,
+    containerFill: blendPaint(a.containerFill, b.containerFill, t),
+    lineFill: blendPaint(a.lineFill, b.lineFill, t),
     containerStroke: blendStroke(a.containerStroke, b.containerStroke, t),
     opacity: mix(a.opacity, b.opacity, t),
   }
@@ -342,7 +342,7 @@ export function blendValues(
 
 export interface EvaluatedFrame {
   /** The colour behind everything, blended. Null where neither end has one. */
-  background: ColorValue | null
+  background: Paint | null
   stateIndex: number
   nextStateIndex: number
   segment: 'hold' | 'transition'
@@ -386,7 +386,7 @@ export function evaluateFrameAtTime(frame: FrameObject, authoredTimeMs: number):
      * arrives fades up from a transparent version of ITSELF rather than out of
      * black — and a hold shows exactly what was chosen, null included.
      */
-    background: blendColour(from?.background ?? null, to?.background ?? null, e),
+    background: blendPaint(from?.background ?? null, to?.background ?? null, e),
     stateIndex: moment.from,
     nextStateIndex: moment.to,
     segment: 'transition',
@@ -462,9 +462,9 @@ export function sameAppearance(
 ): boolean {
   if (!a || !b) return a === b
   return (
-    a.textFill === b.textFill &&
-    a.containerFill === b.containerFill &&
-    a.lineFill === b.lineFill &&
+    samePaint(a.textFill, b.textFill) &&
+    samePaint(a.containerFill, b.containerFill) &&
+    samePaint(a.lineFill, b.lineFill) &&
     sameStroke(a.containerStroke, b.containerStroke, tolerance) &&
     Math.abs(a.opacity - b.opacity) <= tolerance
   )
@@ -541,7 +541,7 @@ export function sameArrangement(
   tolerance = 1e-9,
 ): boolean {
   // The background belongs to no member, so no member's values can carry it.
-  if ((a.background ?? null) !== (b.background ?? null)) return false
+  if (!samePaint(a.background ?? null, b.background ?? null)) return false
   /*
    * Through `sameValues` rather than repeating its field list. The two had
    * separate copies of the same comparison, which is a standing invitation for

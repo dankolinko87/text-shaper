@@ -8,7 +8,8 @@ import {
 export { formatDuration } from '../anim/timeline'
 import { ease } from '../anim/easing'
 import { contentBounds, layoutMosaic } from './layout'
-import { blendColour, mixColours } from '../typography/colour'
+import { blendPaint } from '../typography/paint'
+import type { Paint } from '../types/paint'
 import { blendStroke } from '../geometry/stroke'
 import { DEFAULT_GLYPH_COLOUR } from '../types/mosaic'
 import type { FontSettings, LetterMosaicObject, PositionedStroke } from '../types/document'
@@ -109,7 +110,7 @@ export interface EvaluatedMosaicFrame {
    */
   glyphKeys: Record<string, string>
   /** The colour of each tile's letter at this moment, by tile id. */
-  glyphColours: Record<string, string>
+  glyphColours: Record<string, Paint>
   /**
    * The colour behind each tile at this moment, by tile id.
    *
@@ -117,14 +118,14 @@ export interface EvaluatedMosaicFrame {
    * — a tile fading OUT is a colour at zero alpha, and a tile that was never
    * given a colour is nothing.
    */
-  tileColours: Record<string, string | null>
+  tileColours: Record<string, Paint | null>
   /**
    * Behind the whole mosaic at this moment, or null for no backdrop.
    *
    * Not part of `tileColours`: it belongs to the composition's box rather than
    * to any tile, and it is what fills the outer padding and the gaps.
    */
-  background: string | null
+  background: Paint | null
   /**
    * The composition's own edge at this moment, or null for none.
    *
@@ -210,29 +211,29 @@ function blend(
 const mix = (a: number, b: number, t: number): number => a + (b - a) * t
 
 export function blendColours(
-  from: Record<string, string | null>,
-  to: Record<string, string | null>,
+  from: Record<string, Paint | null>,
+  to: Record<string, Paint | null>,
   t: number,
-  fallback: string | null,
-): Record<string, string | null> {
-  const out: Record<string, string | null> = {}
+  fallback: Paint | null,
+): Record<string, Paint | null> {
+  const out: Record<string, Paint | null> = {}
   for (const key of new Set([...Object.keys(from), ...Object.keys(to)])) {
-    out[key] = blendColour(from[key] ?? fallback, to[key] ?? fallback, t)
+    out[key] = blendPaint(from[key] ?? fallback, to[key] ?? fallback, t)
   }
   return out
 }
 
 /** Glyph colours have a default rather than a null, so they never disappear. */
 export function blendGlyphColours(
-  from: Record<string, string>,
-  to: Record<string, string>,
+  from: Record<string, Paint>,
+  to: Record<string, Paint>,
   t: number,
-): Record<string, string> {
-  const out: Record<string, string> = {}
+): Record<string, Paint> {
+  const out: Record<string, Paint> = {}
   for (const key of new Set([...Object.keys(from), ...Object.keys(to)])) {
     const a = from[key] ?? DEFAULT_GLYPH_COLOUR
     const b = to[key] ?? DEFAULT_GLYPH_COLOUR
-    out[key] = t <= 0 ? a : t >= 1 ? b : mixColours(a, b, t)
+    out[key] = blendPaint(a, b, t) ?? a
   }
   return out
 }
@@ -267,9 +268,9 @@ export function evaluateMosaicAtTime(
     corners: MosaicCorners,
     chars: Record<string, string>,
     font: FontSettings,
-    glyphColours: Record<string, string>,
-    tileColours: Record<string, string | null>,
-    background: string | null,
+    glyphColours: Record<string, Paint>,
+    tileColours: Record<string, Paint | null>,
+    background: Paint | null,
     stroke: PositionedStroke | null,
   ): EvaluatedMosaicFrame => ({
     stateIndex,
@@ -411,7 +412,7 @@ export function evaluateMosaicAtTime(
       from.font,
       blendGlyphColours(from.glyphColour, to.glyphColour, e),
       blendColours(from.tileColour, to.tileColour, e, null),
-      blendColour(from.background ?? null, to.background ?? null, e),
+      blendPaint(from.background ?? null, to.background ?? null, e),
       blendStroke(from.stroke ?? null, to.stroke ?? null, e),
     )
   }

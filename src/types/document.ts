@@ -26,8 +26,9 @@ export const MIN_FONT_SIZE = 4
 import type { FrameMember, FrameState } from './frame'
 import type { MeshNode, MeshState, MeshTile } from './mesh'
 import type { MosaicState, MosaicTile } from './mosaic'
+import type { ImageAsset, Paint, StrokePaint } from './paint'
 
-export const DOCUMENT_SCHEMA_VERSION = 31
+export const DOCUMENT_SCHEMA_VERSION = 32
 
 /**
  * SVG path `d` string, in absolute commands.
@@ -287,8 +288,12 @@ export type AnimationPreset =
   | 'jitter'
   | 'travel'
 
-/** How a colour moves through the loop. Applies to the type or the container. */
-export type ColourEffect = 'none' | 'cycle' | 'flicker' | 'gradient'
+/**
+ * How a SOLID colour moves through the loop. Applies to the type or the
+ * container. A gradient is a paint of its own and carries its own motion,
+ * so it is no longer an effect here.
+ */
+export type ColourEffect = 'none' | 'cycle' | 'flicker'
 
 /**
  * A colour and what it does over the loop.
@@ -371,7 +376,7 @@ export interface AnimationSettings {
  * their word.
  */
 export interface Stroke {
-  colour: ColorValue
+  colour: StrokePaint
   /** In object units. */
   width: number
   /** Null is solid. Both numbers are in object units, so dashes scale too. */
@@ -400,16 +405,16 @@ export interface PositionedStroke extends Stroke {
 }
 
 export interface AppearanceSettings {
-  textFill: ColorValue
+  textFill: Paint
   /** Optional container/background fill; null renders no container. */
-  containerFill: ColorValue | null
+  containerFill: Paint | null
   /**
    * Optional banner behind the type, following the run; null draws none.
    *
    * Only the run modes have one — a spiral and a ring have a line to follow,
    * and rows in a shape do not.
    */
-  lineFill: ColorValue | null
+  lineFill: Paint | null
   /**
    * The container's own edge; null draws none.
    *
@@ -751,4 +756,13 @@ export interface TextShaperDocument {
    */
   objectOrder: string[]
   defaults: DocumentDefaults
+  /**
+   * The pictures the document's paints refer to, by id.
+   *
+   * Kept once each and named from their contents, so a picture on twenty
+   * tiles is one string, and a paste of the same picture lands on the one
+   * already here. Swept of anything nothing refers to when the document is
+   * saved.
+   */
+  assets: Record<string, ImageAsset>
 }

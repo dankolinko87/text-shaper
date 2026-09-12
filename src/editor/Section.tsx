@@ -1,7 +1,11 @@
 import type { ReactNode } from 'react'
 
 import { Icon } from '../components/Icon'
+import { useDocumentStore } from '../state/documentStore'
+import { solidOf } from '../typography/paint'
 import type { Stroke } from '../types/document'
+import type { Paint } from '../types/paint'
+import { paintCss } from './gradientCss'
 import './panels.css'
 
 /**
@@ -62,6 +66,24 @@ export function ColourChip({ value }: { value: string | null | undefined }) {
   return <span className="section__chip" style={{ background: value }} aria-hidden="true" />
 }
 
+/** The same, for any paint: a colour, the run of a gradient, or a picture. */
+export function PaintChip({ value }: { value: Paint | null | undefined }) {
+  const src = useDocumentStore((s) =>
+    value && typeof value === 'object' && value.kind === 'image' ? s.doc.assets[value.asset]?.src : undefined,
+  )
+  if (!value) return <span className="section__summary-empty">None</span>
+  if (src) {
+    return (
+      <span
+        className="section__chip section__chip--image"
+        style={{ backgroundImage: `url(${src})` }}
+        aria-hidden="true"
+      />
+    )
+  }
+  return <span className="section__chip" style={{ background: paintCss(value) }} aria-hidden="true" />
+}
+
 /**
  * The same, for a border — drawn as a ring rather than a filled square.
  *
@@ -74,7 +96,7 @@ export function StrokeChip({ value }: { value: Stroke | null | undefined }) {
   return (
     <span
       className="section__chip section__chip--ring"
-      style={{ borderColor: value.colour, borderStyle: value.dash ? 'dashed' : 'solid' }}
+      style={{ borderColor: solidOf(value.colour), borderStyle: value.dash ? 'dashed' : 'solid' }}
       aria-hidden="true"
     />
   )

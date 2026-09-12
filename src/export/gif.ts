@@ -1,8 +1,9 @@
+import { loadAssets, paintAlpha, paintStyle } from './paintStyle'
+import type { ImageAsset } from '../types/paint'
 import { GIFEncoder, applyPalette, quantize } from 'gifenc'
 
 
 import { pathBounds } from '../geometry/path'
-import { gradientEnds, radialEnds, type FillPaint } from '../typography/colour'
 import { animationFrames, fitObject } from '../typography/objectFit'
 import type { DocumentObject, Rect } from '../types/document'
 import { strokeReach } from '../geometry/stroke'
@@ -31,6 +32,8 @@ export interface GifExportOptions {
   frames: number
   background: GifBackground
   name: string
+  /** The pictures the object's paints refer to. */
+  assets?: Readonly<Record<string, ImageAsset>>
   /** Colour behind the artwork when the background is solid. */
   artboard?: string
 }
@@ -45,6 +48,7 @@ export async function exportGif(options: GifExportOptions): Promise<void> {
 
 /** The encoded bytes, separated from the download so it can be inspected. */
 export async function renderGif(options: GifExportOptions): Promise<Uint8Array> {
+  await loadAssets(options.assets)
   const { object, size, frames, background } = options
   /*
    * Typography only, for now, and it says so rather than failing oddly.
@@ -123,7 +127,9 @@ export async function renderGif(options: GifExportOptions): Promise<Uint8Array> 
     const shape = frame.shapePath ? new Path2D(frame.shapePath) : container
     if (frame.shapeFill) {
       ctx.fillStyle = paintStyle(ctx, frame.shapeFill, shapeBox)
+      ctx.globalAlpha = paintAlpha(frame.shapeFill)
       ctx.fill(shape, 'nonzero')
+      ctx.globalAlpha = 1
     }
     /*
      * The border on the same outline, straight after the fill it belongs to and
@@ -132,7 +138,9 @@ export async function renderGif(options: GifExportOptions): Promise<Uint8Array> 
     if (border) strokeOnContext(ctx, shape, border, bounds)
     if (frame.path.length > 0) {
       ctx.fillStyle = paintStyle(ctx, frame.textFill, textBox)
+      ctx.globalAlpha = paintAlpha(frame.textFill)
       ctx.fill(new Path2D(frame.path), 'nonzero')
+      ctx.globalAlpha = 1
     }
     ctx.restore()
 
@@ -157,46 +165,6 @@ export async function renderGif(options: GifExportOptions): Promise<Uint8Array> 
   return encoder.bytes()
 }
 
-/**
- * Turn a described fill into something this canvas can paint with.
- *
- * The box is in the SAME coordinates the path is drawn in, so the gradient is
- * placed by the artwork's own geometry rather than by the output size — a 256px
- * and a 768px export then differ only in resolution.
- */
-function paintStyle(
-  ctx: CanvasRenderingContext2D,
-  paint: FillPaint,
-  box: Rect,
-): string | CanvasGradient {
-  if (paint.kind === 'solid') return paint.colour
-
-  let gradient: CanvasGradient
-  if (paint.shape === 'radial') {
-    const ends = radialEnds(paint.centre, paint.radius)
-    // The radius is a share of the box's own diagonal, so an oval box gets an
-    // oval-ish reach rather than a circle cropped by the narrow side.
-    const reach = ends.r2 * Math.hypot(box.width, box.height)
-    gradient = ctx.createRadialGradient(
-      box.x + ends.x1 * box.width,
-      box.y + ends.y1 * box.height,
-      0,
-      box.x + ends.x2 * box.width,
-      box.y + ends.y2 * box.height,
-      Math.max(0.001, reach),
-    )
-  } else {
-    const ends = gradientEnds(paint.angle, paint.offset, paint.spread)
-    gradient = ctx.createLinearGradient(
-      box.x + ends.x1 * box.width,
-      box.y + ends.y1 * box.height,
-      box.x + ends.x2 * box.width,
-      box.y + ends.y2 * box.height,
-    )
-  }
-  for (const stop of paint.stops) gradient.addColorStop(stop.at, stop.colour)
-  return gradient
-}
 
 /** The smallest box holding all of them. */
 function union(boxes: Rect[]): Rect {

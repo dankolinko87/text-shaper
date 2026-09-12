@@ -52,6 +52,54 @@ interface EyeDropperWindow {
   EyeDropper?: new () => { open(): Promise<{ sRGBHex: string }> }
 }
 
+/**
+ * Where a popover hung from an anchor goes.
+ *
+ * BESIDE the swatch, to its left, its top level with the swatch's — the
+ * panel the swatch sits in is at the right edge of the window, and a popover
+ * under the swatch covered the very controls it was opened from. Below it
+ * only when there is no room on the left, and above when below would leave
+ * the window; never off any edge. Re-placed on resize, on any scroll
+ * (capture, so the panel's own scroll counts), and whenever the popover
+ * itself changes size — a tab that opens a taller body would otherwise leave
+ * its bottom below the window. One taller than the window scrolls inside.
+ */
+export function usePopoverPlacement(
+  anchor: RefObject<HTMLElement | null>,
+  popoverRef: RefObject<HTMLDivElement | null>,
+  width = WIDTH,
+): void {
+  useLayoutEffect(() => {
+    const place = (): void => {
+      const box = anchor.current?.getBoundingClientRect()
+      const element = popoverRef.current
+      if (!box || !element) return
+      const height = element.offsetHeight
+      let left = box.left - GAP - width
+      let top = box.top
+      if (left < MARGIN) {
+        left = Math.min(Math.max(MARGIN, box.left), window.innerWidth - width - MARGIN)
+        top = box.bottom + GAP
+        if (top + height > window.innerHeight - MARGIN) top = Math.max(MARGIN, box.top - GAP - height)
+      } else {
+        top = Math.max(MARGIN, Math.min(top, window.innerHeight - MARGIN - height))
+      }
+      element.style.top = `${top}px`
+      element.style.left = `${left}px`
+    }
+    place()
+    window.addEventListener('resize', place)
+    window.addEventListener('scroll', place, true)
+    const grown = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(place) : null
+    if (popoverRef.current && grown) grown.observe(popoverRef.current)
+    return () => {
+      window.removeEventListener('resize', place)
+      window.removeEventListener('scroll', place, true)
+      grown?.disconnect()
+    }
+  }, [anchor, popoverRef, width])
+}
+
 export function ColorPicker({
   label,
   value,
@@ -70,6 +118,41 @@ export function ColorPicker({
   onChange: (value: string) => void
   onCommit?: () => void
   onClose: () => void
+}) {
+  usePopoverPlacement(anchor, popoverRef)
+  return createPortal(
+    <div
+      className="color-picker popover"
+      role="dialog"
+      aria-label={label}
+      ref={popoverRef}
+      /*
+       * Escape closes the picker and goes no further: the editor's own Escape
+       * would drop the selection and take the panel — and the picker — with it.
+       */
+      onKeyDown={(e) => {
+        if (e.key !== 'Escape') return
+        e.stopPropagation()
+        onClose()
+      }}
+    >
+      <ColorPickerBody label={label} value={value} onChange={onChange} onCommit={onCommit} />
+    </div>,
+    document.body,
+  )
+}
+
+/** The picker's controls, for any popover that wants a colour in it. */
+export function ColorPickerBody({
+  label,
+  value,
+  onChange,
+  onCommit,
+}: {
+  label: string
+  value: string
+  onChange: (value: string) => void
+  onCommit?: () => void
 }) {
   const parsed = hexToHsv(value) ?? { h: 0, s: 0, v: 0, a: 1 }
   const [hue, setHue] = useState(parsed.h)
@@ -131,29 +214,6 @@ export function ColorPicker({
     apply({ ...hsv, s: clamp01(hsv.s + ds), v: clamp01(hsv.v + dv) })
   }
 
-  /* ------------------------------------------------------- placement */
-  useLayoutEffect(() => {
-    const place = (): void => {
-      const box = anchor.current?.getBoundingClientRect()
-      const element = popoverRef.current
-      if (!box || !element) return
-      const height = element.offsetHeight
-      let top = box.bottom + GAP
-      if (top + height > window.innerHeight - MARGIN) top = Math.max(MARGIN, box.top - GAP - height)
-      const left = Math.min(Math.max(MARGIN, box.left), window.innerWidth - WIDTH - MARGIN)
-      element.style.top = `${top}px`
-      element.style.left = `${left}px`
-    }
-    place()
-    window.addEventListener('resize', place)
-    // Capture, so the panel's own scroll counts: the picker follows its swatch.
-    window.addEventListener('scroll', place, true)
-    return () => {
-      window.removeEventListener('resize', place)
-      window.removeEventListener('scroll', place, true)
-    }
-  }, [anchor, popoverRef])
-
   // Opened by a press on the swatch; the field takes focus so the keys work at once.
   useEffect(() => {
     fieldRef.current?.focus()
@@ -199,22 +259,8 @@ export function ColorPicker({
     </span>
   )
 
-  return createPortal(
-    <div
-      className="color-picker popover"
-      role="dialog"
-      aria-label={label}
-      ref={popoverRef}
-      /*
-       * Escape closes the picker and goes no further: the editor's own Escape
-       * would drop the selection and take the panel — and the picker — with it.
-       */
-      onKeyDown={(e) => {
-        if (e.key !== 'Escape') return
-        e.stopPropagation()
-        onClose()
-      }}
-    >
+  return (
+    <>
       <div
         className="color-picker__field"
         ref={fieldRef}
@@ -324,7 +370,6 @@ export function ColorPicker({
           </span>
         </span>
       </div>
-    </div>,
-    document.body,
+    </>
   )
 }

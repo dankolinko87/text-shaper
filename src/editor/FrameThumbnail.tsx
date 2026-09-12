@@ -1,3 +1,5 @@
+import { solidOf } from '../typography/paint'
+import { svgPaints } from './svgPaint'
 import { useMemo, type ReactElement } from 'react'
 
 import { memberAtState, stateShape, valuesFor } from '../frame/frame'
@@ -126,13 +128,13 @@ function artworkFor(
   const border = drawn.appearance.containerStroke
   const stroke =
     border && border.width > 0
-      ? { colour: border.colour, width: strokePaint(border).width, dash: dashArrayFor(border) }
+      ? { colour: solidOf(border.colour), width: strokePaint(border).width, dash: dashArrayFor(border) }
       : null
 
   const base: MemberArtwork = {
     memberId: member.id,
     container: drawn.currentSourcePath,
-    containerFill: drawn.appearance.containerFill,
+    containerFill: drawn.appearance.containerFill ? solidOf(drawn.appearance.containerFill) : null,
     stroke,
     text: null,
     textFill: null,
@@ -161,25 +163,29 @@ function artworkFor(
   return {
     ...base,
     text: frame.path,
-    textFill: solid(frame.textFill) ?? drawn.appearance.textFill,
+    textFill: solid(frame.textFill) ?? solidOf(drawn.appearance.textFill),
     band: frame.bandPath,
-    bandFill: frame.bandFill ? (solid(frame.bandFill) ?? drawn.appearance.lineFill) : null,
+    bandFill: frame.bandFill ? (solid(frame.bandFill) ?? solidOf(drawn.appearance.lineFill)) : null,
   }
 }
 
 /** A paint as one colour; a gradient answers with the colour it starts from. */
 function solid(paint: FillPaint | null | undefined): string | null {
   if (!paint) return null
-  return paint.kind === 'solid' ? paint.colour : (paint.stops[0]?.colour ?? null)
+  if (paint.kind === 'solid') return paint.colour
+  if (paint.kind === 'image') return '#888888'
+  return paint.stops[0]?.colour ?? null
 }
 
 function draw(object: FrameObject, state: FrameState): ReactElement {
   const box = object.localBounds
   const artwork = frameStateArtwork(object, state)
+  const paints = svgPaints(`thumb-${object.id}-${state.id}`, useDocumentStore.getState().doc.assets)
   return (
     <>
+      <defs>{paints.defs()}</defs>
       {state.background ? (
-        <rect x={box.x} y={box.y} width={box.width} height={box.height} fill={state.background} />
+        <rect x={box.x} y={box.y} width={box.width} height={box.height} fill={paints.fill(state.background, box)} />
       ) : null}
       {artwork.map((each) => {
         const t = each.transform

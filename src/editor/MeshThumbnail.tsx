@@ -1,9 +1,10 @@
+import { svgPaints } from './svgPaint'
 import { useMemo, type ReactElement } from 'react'
 
 import { strokeReach } from '../geometry/stroke'
 import { glyphPathString, glyphRest } from '../mesh/glyph'
 import { meshChars, meshCorners, meshTiles } from '../mesh/layout'
-import { cellMap, commandsToPath, edgesOf, roundedPolygonCommands } from '../mesh/mesh'
+import { polygonBounds, cellMap, commandsToPath, edgesOf, roundedPolygonCommands } from '../mesh/mesh'
 import { silhouetteCommands } from './meshPlayback'
 import { useDocumentStore } from '../state/documentStore'
 import type { MeshObject } from '../types/document'
@@ -49,6 +50,7 @@ function draw(object: MeshObject, at: number, state: MeshState) {
   const corners = meshCorners(object, at)
   const clip = `thumb-clip-${object.id}-${at}`
   const nodes = state.nodes
+  const paints = svgPaints(`thumb-${object.id}-${at}`, useDocumentStore.getState().doc.assets)
 
   // The silhouette, grown by the padding: the clip, the border and the backdrop.
   const rim = commandsToPath(
@@ -66,7 +68,7 @@ function draw(object: MeshObject, at: number, state: MeshState) {
         <path
           key={`t-${tile.id}`}
           d={commandsToPath(roundedPolygonCommands(layout.visible, corners.tileRadius))}
-          fill={fill}
+          fill={paints.fill(fill, polygonBounds(layout.visible))}
         />,
       )
     }
@@ -80,7 +82,7 @@ function draw(object: MeshObject, at: number, state: MeshState) {
       <path
         key={`g-${tile.id}`}
         d={glyphPathString(rest, map)}
-        fill={state.glyphColour[tile.id] ?? DEFAULT_GLYPH_COLOUR}
+        fill={paints.fill(state.glyphColour[tile.id] ?? DEFAULT_GLYPH_COLOUR, polygonBounds(layout.glyph))}
       />,
     )
   }
@@ -96,19 +98,20 @@ function draw(object: MeshObject, at: number, state: MeshState) {
 
   return (
     <>
+      <defs>{paints.defs()}</defs>
       <defs>
         <clipPath id={clip} clipRule="evenodd">
           <path d={rim} clipRule="evenodd" />
         </clipPath>
       </defs>
       <g clipPath={`url(#${clip})`}>
-        {state.background ? <path d={rim} fill={state.background} fillRule="evenodd" /> : null}
+        {state.background ? <path d={rim} fill={paints.fill(state.background, object.localBounds)} fillRule="evenodd" /> : null}
         {cells}
         {lines.length > 0 && state.lines ? (
           <path
             d={lines.join(' ')}
             fill="none"
-            stroke={state.lines.colour}
+            stroke={paints.fill(state.lines.colour)}
             strokeWidth={state.lines.width}
             strokeDasharray={
               state.lines.dash ? `${state.lines.dash.length} ${state.lines.dash.gap}` : undefined
@@ -120,7 +123,7 @@ function draw(object: MeshObject, at: number, state: MeshState) {
         <path
           d={rim}
           fill="none"
-          stroke={state.stroke.colour}
+          stroke={paints.fill(state.stroke.colour)}
           strokeWidth={state.stroke.width}
           strokeDasharray={
             state.stroke.dash ? `${state.stroke.dash.length} ${state.stroke.dash.gap}` : undefined

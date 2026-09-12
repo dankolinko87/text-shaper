@@ -216,6 +216,31 @@ describe('cells', () => {
     near(evaluatePatch(patch, 0.5, 1), { x: 50, y: 100 }, 1e-3)
   })
 
+  it('maps the visible face as well as the glyph, and remembers the tiers', () => {
+    const seeded = seedMesh(2, 1, 100)
+    const layouts = layoutMesh(seeded.tiles, seeded.positions, { gap: 6, glyphInset: 6 })
+    const first = layouts.get(seeded.tiles[0]!.id)!
+    const face = cellMap(first, 'visible')!
+    near(face(0, 0), { x: -100, y: -50 })
+    near(face(1, 1), { x: -3, y: 50 })
+    expect(first.visibleRect).toEqual({ x: -100, y: -50, width: 97, height: 100 })
+    // The glyph map is the inset one, untouched.
+    near(cellMap(first)!(0, 0), { x: first.rect!.x, y: first.rect!.y })
+
+    const tile = { id: 't', ring: ['a', 'b', 'c', 'd'], corners: ['a', 'b', 'c', 'd'] as [string, string, string, string] }
+    const positions = { a: { x: 0, y: 0 }, b: { x: 100, y: 20 }, c: { x: 120, y: 120 }, d: { x: 10, y: 100 } }
+    const sheared = tileLayout(tile, positions, { gap: 0, glyphInset: 10 }, () => false)
+    const shearedFace = cellMap(sheared, 'visible')!
+    near(shearedFace(0, 0), positions.a)
+    near(shearedFace(1, 1), positions.c)
+    expect(sheared.visibleRect).toBeNull()
+    expect(sheared.visiblePatch).toBeNull()
+    // The glyph is inset, so its map lands inside the face.
+    const inner = cellMap(sheared)!(0, 0)
+    expect(inner.x).toBeGreaterThan(positions.a.x)
+    expect(inner.y).toBeGreaterThan(positions.a.y)
+  })
+
   it('is a rectangle only in the expected corner order', () => {
     expect(rectangleOf(square())).toEqual({ x: 0, y: 0, width: 100, height: 100 })
     const turned = [square()[1]!, square()[2]!, square()[3]!, square()[0]!]

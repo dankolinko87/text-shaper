@@ -15,7 +15,10 @@ import { createEmptyDocument, documentDefaults } from '../../src/state/defaults'
 import { deserializeDocument, serializeDocument } from '../../src/state/persistence'
 import { useDocumentStore } from '../../src/state/documentStore'
 import { valuesFor } from '../../src/frame/frame'
-import { paintAt, samePaint, stopColourAt } from '../../src/typography/colour'
+import { sameFillPaint, stopColourAt } from '../../src/typography/colour'
+import { resolvePaint } from '../../src/typography/paint'
+import type { GradientPaint, ImagePaint, Paint } from '../../src/types/paint'
+import { legacyGradientPaint } from '../fixtures/legacyGradient'
 import type { ColourSettings } from '../../src/types/document'
 import { outlineToPath, pathToOutline } from '../../src/geometry/outline'
 import { mosaicTiles } from '../../src/mosaic/tiles'
@@ -1587,37 +1590,40 @@ describe('v28 -> v29: a frame’s states say only what was authored in them', ()
   })
 })
 
-describe('v29 -> v30: a gradient is its own stops', () => {
-  const settingsOf = (object: Record<string, unknown>, key: 'textColour' | 'shapeColour'): ColourSettings =>
-    (object['animation'] as Record<string, ColourSettings>)[key] as ColourSettings
+describe('v29 -> v32: a gradient effect becomes the paint of the part it coloured', () => {
+  const paintsOf = (object: Record<string, unknown>) => object['appearance'] as Record<string, Paint | null>
+  const effectsOf = (object: Record<string, unknown>) =>
+    object['animation'] as Record<string, ColourSettings>
 
-  it('turns each gradient into the two stops that draw the same picture', () => {
+  it('turns each gradient into the paint that draws the same picture, and stands the effect down', () => {
     const object = JSON.parse(
       JSON.stringify(deserializeDocument(gradientDocument('#00ff00')).doc!.objects['a']),
     ) as Record<string, unknown>
-    const text = settingsOf(object, 'textColour')
-    const shape = settingsOf(object, 'shapeColour')
-    expect(text.config['stops']).toEqual([
+    const text = paintsOf(object)['textFill'] as GradientPaint
+    const shape = paintsOf(object)['containerFill'] as GradientPaint
+    expect(text.kind).toBe('gradient')
+    expect(text.stops).toEqual([
       { at: 0, colour: '#123456' },
       { at: 1, colour: '#00ff00' },
     ])
-    expect(shape.config['stops']).toEqual([
+    expect(text.angle, 'everything else rides through').toBe(30)
+    expect(text.motion).toBe('sweep')
+    expect(text.travel).toBeCloseTo(0.4, 9)
+    expect(shape.shape).toBe('radial')
+    expect(shape.stops).toEqual([
       { at: 0, colour: '#abcdef' },
       { at: 1, colour: '#0000ff' },
     ])
-    expect('to' in text.config).toBe(false)
-    expect(text.config['angle'], 'everything else rides through').toBe(30)
-    expect(text.config['motion']).toBe('sweep')
+    expect(shape.motion, 'a still gradient carries no motion').toBeUndefined()
+    expect(effectsOf(object)['textColour']!.effect).toBe('none')
+    expect(effectsOf(object)['shapeColour']!.effect).toBe('none')
 
-    // The picture is the one the old two-colour config painted, at rest and in motion.
-    const old: ColourSettings = {
-      effect: 'gradient',
-      config: { to: '#00ff00', shape: 'linear', angle: 30, motion: 'sweep', travel: 0.4 },
-    }
+    // The picture is the one the old effect painted, at rest and in motion.
+    const old = { to: '#00ff00', shape: 'linear', angle: 30, motion: 'sweep', travel: 0.4 }
     for (const phase of [0, 0.3, 0.7]) {
-      const was = paintAt(old, phase, '#123456')
-      const now = paintAt(text, phase, '#123456')
-      expect(samePaint(was, now), `phase ${phase}`).toBe(true)
+      const was = legacyGradientPaint(old, phase, '#123456')
+      const now = resolvePaint(text, phase)!
+      expect(sameFillPaint(was, now), `phase ${phase}`).toBe(true)
       if (was.kind === 'gradient' && now.kind === 'gradient') {
         for (const t of [0, 0.5, 1]) expect(stopColourAt(now.stops, t)).toBe(stopColourAt(was.stops, t))
       }
@@ -1628,7 +1634,7 @@ describe('v29 -> v30: a gradient is its own stops', () => {
     const object = JSON.parse(
       JSON.stringify(deserializeDocument(gradientDocument('#00ff0080')).doc!.objects['a']),
     ) as Record<string, unknown>
-    expect((settingsOf(object, 'textColour').config['stops'] as { colour: string }[])[1]?.colour).toBe('#e0552f')
+    expect((paintsOf(object)['textFill'] as GradientPaint).stops[1]?.colour).toBe('#e0552f')
   })
 
   it('leaves a cycle its second colour', () => {
@@ -1677,29 +1683,116 @@ describe('v29 -> v30: a gradient is its own stops', () => {
 
     const raw = JSON.parse(serializeDocument(useDocumentStore.getState().doc)) as Record<string, unknown>
     raw['schemaVersion'] = 29
+    delete raw['assets']
     const object = (raw['objects'] as Record<string, Record<string, unknown>>)[frame]!
-    const own = (object['members'] as { object: Record<string, unknown> }[])[0]!.object
+    const members = object['members'] as { id: string; object: Record<string, unknown> }[]
+    const own = members[0]!.object
     const animation = own['animation'] as Record<string, unknown>
     animation['textColour'] = { effect: 'gradient', config: { to: '#ff0000', shape: 'linear', angle: 0, motion: 'still', travel: 0.5 } }
     const base = (own['appearance'] as { textFill: string }).textFill
+    // A state that patched the member's colour never showed that colour: the
+    // effect painted its stops over it. The patch becomes the gradient too.
+    const states = object['states'] as { values: Record<string, unknown> }[]
+    states[1]!.values[members[0]!.id] = { appearance: { textFill: '#00ff00' } }
 
     const once = deserializeDocument(JSON.stringify(raw))
+    expect(once.ok, once.error).toBe(true)
     const loaded = once.doc!.objects[frame]
     if (loaded?.kind !== 'frame') throw new Error('expected a frame')
     const member = loaded.members[0]!.object
     if (member.kind !== 'typography') throw new Error('expected type')
-    expect(member.animation.textColour.config['stops']).toEqual([
-      { at: 0, colour: base },
-      { at: 1, colour: '#ff0000' },
-    ])
+    const expected = {
+      kind: 'gradient',
+      shape: 'linear',
+      stops: [
+        { at: 0, colour: base },
+        { at: 1, colour: '#ff0000' },
+      ],
+      angle: 0,
+    }
+    expect(member.appearance.textFill).toEqual(expected)
+    expect(member.animation.textColour.effect).toBe('none')
+    expect(loaded.states[1]!.values[members[0]!.id]!.appearance?.textFill).toEqual(expected)
+    expect(once.doc!.assets).toEqual({})
 
     const again = deserializeDocument(serializeDocument(once.doc!))
     const twice = again.doc!.objects[frame]
     if (twice?.kind !== 'frame') throw new Error('expected a frame')
     const member2 = twice.members[0]!.object
-    expect(member2.kind === 'typography' && member2.animation.textColour.config['stops']).toEqual(
-      member.animation.textColour.config['stops'],
-    )
+    expect(member2.kind === 'typography' && member2.appearance.textFill).toEqual(expected)
+  })
+})
+
+describe('v32: paints and pictures', () => {
+  const picture = (asset: string): ImagePaint => ({ kind: 'image', asset, crop: { scale: 1, x: 0, y: 0 } })
+  const asset = { id: 'img_a', src: 'data:image/png;base64,AAAA', width: 4, height: 4 }
+
+  it('keeps a picture the document holds, and drops one it does not', () => {
+    const doc = createEmptyDocument()
+    const raw = JSON.parse(serializeDocument(doc)) as Record<string, unknown>
+    raw['assets'] = { img_a: asset }
+    const store = useDocumentStore.getState()
+    useDocumentStore.setState({ doc, past: [], future: [], selection: [] })
+    const id = store.createMosaic({ columns: 2, rows: 1, artboardCenter: { x: 0, y: 0 }, text: 'AB' })
+    const withMosaic = JSON.parse(serializeDocument(useDocumentStore.getState().doc)) as Record<string, unknown>
+    withMosaic['assets'] = { img_a: asset }
+    const mosaic = (withMosaic['objects'] as Record<string, Record<string, unknown>>)[id]!
+    const state = (mosaic['states'] as Record<string, unknown>[])[0]!
+    const tile = (mosaic['tiles'] as { id: string }[])[0]!.id
+    state['background'] = picture('img_a')
+    state['tileColour'] = { [tile]: picture('img_missing') }
+    state['glyphColour'] = { [tile]: picture('img_missing') }
+
+    const result = deserializeDocument(JSON.stringify(withMosaic))
+    expect(result.ok, result.error).toBe(true)
+    const loaded = result.doc!.objects[id]
+    if (loaded?.kind !== 'mosaic') throw new Error('expected a mosaic')
+    expect(loaded.states[0]!.background).toEqual(picture('img_a'))
+    expect(loaded.states[0]!.tileColour[tile], 'a background with no picture is nothing').toBeUndefined()
+    expect(loaded.states[0]!.glyphColour[tile], 'a letter falls back to its default').toBe('#101014')
+    expect(result.doc!.assets['img_a']).toEqual(asset)
+  })
+
+  it('refuses a document whose assets are not pictures, and gives an old one an empty set', () => {
+    const doc = createEmptyDocument()
+    const raw = JSON.parse(serializeDocument(doc)) as Record<string, unknown>
+    raw['assets'] = { img_a: { id: 'img_a', src: 'not a data url', width: 4, height: 4 } }
+    expect(deserializeDocument(JSON.stringify(raw)).ok).toBe(false)
+
+    const old = JSON.parse(serializeDocument(doc)) as Record<string, unknown>
+    delete old['assets']
+    old['schemaVersion'] = 31
+    const loaded = deserializeDocument(JSON.stringify(old))
+    expect(loaded.ok, loaded.error).toBe(true)
+    expect(loaded.doc!.assets).toEqual({})
+  })
+
+  it('repairs a malformed gradient to the part’s default', () => {
+    const raw = JSON.parse(documentAt(32, {
+      kind: 'typography',
+      appearance: {
+        textFill: { kind: 'gradient', shape: 'linear', stops: [{ at: 0, colour: 'nope' }], angle: 0 },
+        containerFill: { kind: 'gradient', shape: 'radial', stops: [{ at: 0, colour: '#000000' }, { at: 1, colour: '#ffffff' }], angle: 'x', motion: 'wobble' },
+        lineFill: null,
+        containerStroke: { colour: { kind: 'image', asset: 'img_a', crop: { scale: 1, x: 0, y: 0 } }, width: 2, dash: null, position: 'inside' },
+        opacity: 1,
+      },
+    })) as Record<string, unknown>
+    const result = deserializeDocument(JSON.stringify(raw))
+    expect(result.ok, result.error).toBe(true)
+    const object = result.doc!.objects['a']
+    if (object?.kind !== 'typography') throw new Error('expected type')
+    expect(object.appearance.textFill, 'too few real stops').toBe('#101014')
+    expect(object.appearance.containerFill).toEqual({
+      kind: 'gradient',
+      shape: 'radial',
+      stops: [
+        { at: 0, colour: '#000000' },
+        { at: 1, colour: '#ffffff' },
+      ],
+      angle: 0,
+    })
+    expect(object.appearance.containerStroke?.colour, 'no picture on a line').toBe('#101014')
   })
 })
 

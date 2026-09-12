@@ -29,13 +29,14 @@ export function TopBar() {
   const projectsOpen = useUiStore((s) => s.projectsOpen)
   const setProjectsOpen = useUiStore((s) => s.setProjectsOpen)
   const projectCount = useProjectsStore((s) => s.projects.length)
+  const saveFailed = useProjectsStore((s) => s.saveFailed)
 
   useEffect(() => setDraftName(name), [name])
 
   return (
     <header className="topbar">
       <div className="topbar__section">
-        {/* The way into the projects: a chevron toward the drawer's edge. */}
+        {/* The way into the projects: a chevron toward the drawer's edge, and an X while it is open. */}
         <Tooltip label={projectsOpen ? 'Hide projects' : `Show projects (${projectCount})`}>
           <button
             type="button"
@@ -44,7 +45,7 @@ export function TopBar() {
             aria-label={`${projectCount} ${projectCount === 1 ? 'project' : 'projects'}`}
             onClick={() => setProjectsOpen(!projectsOpen)}
           >
-            <Icon name={projectsOpen ? 'chevronRight' : 'chevronLeft'} size={20} />
+            <Icon name={projectsOpen ? 'close' : 'chevronLeft'} size={20} />
           </button>
         </Tooltip>
         {/*
@@ -85,6 +86,14 @@ export function TopBar() {
 
       {/* Undo and redo live on the keyboard (⌘Z, ⇧⌘Z); the header keeps to the document and the view. */}
       <div className="topbar__section topbar__section--end">
+        {saveFailed ? (
+          <Tooltip label="Not saved: the browser's storage is full. Remove a picture or a project to make room.">
+            <span className="topbar__unsaved" role="status">
+              <Icon name="warning" size={16} />
+              Not saved
+            </span>
+          </Tooltip>
+        ) : null}
         <ZoomControl />
         {/*
           Getting the work OUT sits beside the controls for looking at it, not

@@ -10,6 +10,7 @@ import {
   type AnimationFrame,
 } from './animation'
 import { paintAt, type FillPaint } from './colour'
+import { paintMoves, resolvePaint } from './paint'
 import { defaultShapeConfig, mapPatch, shapeAnimationById, type ShapePreset } from './shapeAnimation'
 import { fitTextToShape, type FitOutcome } from './fit'
 import type { FittedLayout } from './frame'
@@ -310,9 +311,7 @@ export function stillFrame(
     textFill: paintAt(object.animation.textColour, 0, object.appearance.textFill),
     bandPath: fitted.band ?? null,
     ribbon: fitted.ribbon ?? [],
-    bandFill: object.appearance.lineFill
-      ? { kind: 'solid', colour: object.appearance.lineFill }
-      : null,
+    bandFill: resolvePaint(object.appearance.lineFill, 0),
     shapePath: null,
     shapeFill: object.appearance.containerFill
       ? paintAt(object.animation.shapeColour, 0, object.appearance.containerFill)
@@ -406,7 +405,7 @@ function composeFrame(
     ribbon: object.appearance.lineFill
       ? renderRibbon(source.layout, typeMoment, bannerMoment, carry)
       : [],
-    bandFill: object.appearance.lineFill ? { kind: 'solid', colour: object.appearance.lineFill } : null,
+    bandFill: resolvePaint(object.appearance.lineFill, phase),
     shapePath: move ? mapPathPoints(source.outlinePath, move) : null,
     shapeFill: object.appearance.containerFill
       ? paintAt(object.animation.shapeColour, phase, object.appearance.containerFill)
@@ -456,7 +455,11 @@ export function isMoving(object: TypographyObject): boolean {
     (object.appearance.lineFill !== null && banner !== 'follow' && banner !== 'none') ||
     (animation.textColour?.effect ?? 'none') !== 'none' ||
     (object.appearance.containerFill !== null &&
-      (animation.shapeColour?.effect ?? 'none') !== 'none')
+      (animation.shapeColour?.effect ?? 'none') !== 'none') ||
+    // A gradient with a motion of its own moves whatever effect is chosen.
+    paintMoves(object.appearance.textFill) ||
+    (object.appearance.containerFill !== null && paintMoves(object.appearance.containerFill)) ||
+    (object.appearance.lineFill !== null && paintMoves(object.appearance.lineFill))
   )
 }
 

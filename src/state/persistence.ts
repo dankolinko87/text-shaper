@@ -14,7 +14,8 @@ import {
   isRim,
 } from '../types/mosaic'
 import { EASING_PRESETS } from '../anim/easing'
-import { parseHex } from '../typography/colour'
+import { gradientStops, MIN_STOPS, parseHex } from '../typography/colour'
+import type { ColourConfigValue, GradientStop } from '../types/document'
 
 /** The easing names a file is allowed to carry. */
 const EASING_NAMES = new Set<string>(EASING_PRESETS)
@@ -126,6 +127,194 @@ function stopsFromTwoColours(object: Record<string, unknown>): void {
   }
 }
 
+/** The gradient a shape's colour effect described, as a paint; null for any other effect. */
+function gradientPaintOf(settings: unknown, base: string): Record<string, unknown> | null {
+  if (!settings || typeof settings !== 'object') return null
+  const colour = settings as Record<string, unknown>
+  if (colour['effect'] !== 'gradient') return null
+  const config = (colour['config'] ?? {}) as Record<string, unknown>
+  const motion = typeof config['motion'] === 'string' ? config['motion'] : 'still'
+  const paint: Record<string, unknown> = {
+    kind: 'gradient',
+    shape: config['shape'] === 'radial' ? 'radial' : 'linear',
+    stops: gradientStops(config as Record<string, ColourConfigValue>, base),
+    angle: typeof config['angle'] === 'number' && Number.isFinite(config['angle']) ? config['angle'] : 0,
+  }
+  if (motion !== 'still') {
+    paint['motion'] = motion
+    paint['travel'] =
+      typeof config['travel'] === 'number' && Number.isFinite(config['travel'])
+        ? Math.min(1, Math.max(0, config['travel']))
+        : 0.5
+  }
+  return paint
+}
+
+/**
+ * A shape's gradient effects become the paints of the parts they coloured.
+ *
+ * The type's onto `textFill`; the body's onto `containerFill`, unless the
+ * shape had no body — a gradient over nothing drew nothing, and stays
+ * nothing. The effect goes back to none either way.
+ */
+function foldGradientEffects(object: Record<string, unknown>): void {
+  const animation = object['animation']
+  const appearance = object['appearance']
+  if (!animation || typeof animation !== 'object' || !appearance || typeof appearance !== 'object') return
+  const paints = appearance as Record<string, unknown>
+  const effects = animation as Record<string, unknown>
+  const textBase = typeof paints['textFill'] === 'string' ? paints['textFill'] : '#101014'
+  const shapeBase = typeof paints['containerFill'] === 'string' ? paints['containerFill'] : textBase
+
+  const text = gradientPaintOf(effects['textColour'], textBase)
+  if (text) {
+    paints['textFill'] = text
+    effects['textColour'] = { effect: 'none', config: {} }
+  }
+  const shape = gradientPaintOf(effects['shapeColour'], shapeBase)
+  if (shape) {
+    if (paints['containerFill'] !== null && paints['containerFill'] !== undefined) paints['containerFill'] = shape
+    effects['shapeColour'] = { effect: 'none', config: {} }
+  }
+}
+
+/**
+ * A frame's states, where a member had a gradient effect.
+ *
+ * A state's colour patch for such a member never showed: the effect painted
+ * its stops over whatever base the state gave, so the picture in every state
+ * WAS the gradient. The patch becomes that gradient, and the picture holds.
+ * Done before the member itself is folded, since folding clears the effect
+ * this reads.
+ */
+function foldMemberGradients(frame: Record<string, unknown>): void {
+  const members = Array.isArray(frame['members']) ? (frame['members'] as unknown[]) : []
+  const states = Array.isArray(frame['states']) ? (frame['states'] as unknown[]) : []
+  for (const member of members) {
+    if (!member || typeof member !== 'object') continue
+    const m = member as Record<string, unknown>
+    const own = m['object'] as Record<string, unknown> | undefined
+    if (!own || own['kind'] !== 'typography' || typeof m['id'] !== 'string') continue
+    const animation = (own['animation'] ?? {}) as Record<string, unknown>
+    const appearance = (own['appearance'] ?? {}) as Record<string, unknown>
+    const textBase = typeof appearance['textFill'] === 'string' ? appearance['textFill'] : '#101014'
+    const shapeBase = typeof appearance['containerFill'] === 'string' ? appearance['containerFill'] : textBase
+    const text = gradientPaintOf(animation['textColour'], textBase)
+    const shape = gradientPaintOf(animation['shapeColour'], shapeBase)
+    if (!text && !shape) continue
+    for (const state of states) {
+      const values = (state as Record<string, unknown> | null)?.['values'] as Record<string, unknown> | undefined
+      const patch = values?.[m['id']] as Record<string, unknown> | undefined
+      const patched = patch?.['appearance'] as Record<string, unknown> | undefined
+      if (!patched) continue
+      if (text && typeof patched['textFill'] === 'string') patched['textFill'] = text
+      if (shape && typeof patched['containerFill'] === 'string') patched['containerFill'] = shape
+    }
+  }
+}
+
+/**
+ * A stored paint, or `fallback` when the value is not one.
+ *
+ * A hex string as ever; a gradient with at least two real stops, a known
+ * shape, a finite angle and a motion from the list; a picture whose asset
+ * the document actually holds and whose crop is numbers. Anything else is
+ * not something a renderer could draw, and the fallback is what a document
+ * that never said otherwise would show.
+ */
+function completePaint(
+  value: unknown,
+  fallback: string | null,
+  assets: Set<string>,
+  strokes = false,
+): string | Record<string, unknown> | null {
+  if (typeof value === 'string') return parseHex(value) ? value : fallback
+  if (!value || typeof value !== 'object') return fallback
+  const paint = value as Record<string, unknown>
+  if (paint['kind'] === 'gradient') {
+    const stops = Array.isArray(paint['stops'])
+      ? (paint['stops'] as unknown[]).filter(
+          (stop) =>
+            !!stop &&
+            typeof stop === 'object' &&
+            typeof (stop as GradientStop).at === 'number' &&
+            Number.isFinite((stop as GradientStop).at) &&
+            typeof (stop as GradientStop).colour === 'string' &&
+            parseHex((stop as GradientStop).colour) !== null,
+        )
+      : []
+    if (stops.length < MIN_STOPS) return fallback
+    const out: Record<string, unknown> = {
+      kind: 'gradient',
+      shape: paint['shape'] === 'radial' ? 'radial' : 'linear',
+      stops: stops.map((stop) => ({
+        at: Math.min(1, Math.max(0, (stop as GradientStop).at)),
+        colour: (stop as GradientStop).colour,
+      })),
+      angle: typeof paint['angle'] === 'number' && Number.isFinite(paint['angle']) ? paint['angle'] : 0,
+    }
+    if (!strokes && GRADIENT_MOTIONS.includes(paint['motion'] as never) && paint['motion'] !== 'still') {
+      out['motion'] = paint['motion']
+      out['travel'] =
+        typeof paint['travel'] === 'number' && Number.isFinite(paint['travel'])
+          ? Math.min(1, Math.max(0, paint['travel']))
+          : 0.5
+    }
+    return out
+  }
+  if (paint['kind'] === 'image' && !strokes) {
+    const crop = paint['crop'] as Record<string, unknown> | undefined
+    if (typeof paint['asset'] !== 'string' || !assets.has(paint['asset'])) return fallback
+    const number = (v: unknown, or: number): number => (typeof v === 'number' && Number.isFinite(v) ? v : or)
+    const out: Record<string, unknown> = {
+      kind: 'image',
+      asset: paint['asset'],
+      crop: {
+        scale: Math.max(1, number(crop?.['scale'], 1)),
+        x: number(crop?.['x'], 0),
+        y: number(crop?.['y'], 0),
+      },
+    }
+    if (typeof paint['opacity'] === 'number' && Number.isFinite(paint['opacity']) && paint['opacity'] < 1) {
+      out['opacity'] = Math.max(0, paint['opacity'])
+    }
+    return out
+  }
+  return fallback
+}
+
+const GRADIENT_MOTIONS = ['still', 'sweep', 'hover', 'pulse'] as const
+
+/** A stroke's colour put right in place, or the stroke dropped when it has none. */
+function completeStrokePaint(stroke: unknown, assets: Set<string>): void {
+  if (!stroke || typeof stroke !== 'object') return
+  const s = stroke as Record<string, unknown>
+  s['colour'] = completePaint(s['colour'], '#101014', assets, true)
+}
+
+/** The ids of the pictures a raw document holds — the only ones a paint may name. */
+function assetIdsOf(raw: Record<string, unknown>): Set<string> {
+  const assets = raw['assets']
+  if (!assets || typeof assets !== 'object') return new Set()
+  return new Set(Object.keys(assets as Record<string, unknown>))
+}
+
+/**
+ * A shape's own paints put right: every fill a paint or its default, the
+ * border's colour a stroke paint. Never completed before this version, when
+ * a fill could only be a string and a string could not be wrong in a way
+ * that drew nothing.
+ */
+function completeTypographyPaints(object: Record<string, unknown>, assets: Set<string>): void {
+  const appearance = object['appearance']
+  if (!appearance || typeof appearance !== 'object') return
+  const paints = appearance as Record<string, unknown>
+  paints['textFill'] = completePaint(paints['textFill'], '#101014', assets) ?? '#101014'
+  paints['containerFill'] = completePaint(paints['containerFill'], null, assets)
+  paints['lineFill'] = completePaint(paints['lineFill'], null, assets)
+  completeStrokePaint(paints['containerStroke'], assets)
+}
+
 /**
  * A frame that arrives missing something it needs.
  *
@@ -133,7 +322,7 @@ function stopsFromTwoColours(object: Record<string, unknown>): void {
  * lets a later animatable property need no migration of its own: absent and
  * default are the same thing, and this makes them so on the way in.
  */
-function completeFrame(object: Record<string, unknown>): void {
+function completeFrame(object: Record<string, unknown>, assets: Set<string> = new Set()): void {
   if (!Array.isArray(object['members'])) object['members'] = []
   if (typeof object['clip'] !== 'boolean') object['clip'] = false
   if (typeof object['speed'] !== 'number' || !(object['speed'] > 0)) object['speed'] = 1
@@ -154,6 +343,8 @@ function completeFrame(object: Record<string, unknown>): void {
     if (typeof state['holdMs'] !== 'number') state['holdMs'] = 0
     if (typeof state['transitionMs'] !== 'number') state['transitionMs'] = 600
     if (!EASING_PRESETS.includes(state['easing'] as never)) state['easing'] = 'ease-in-out'
+    // The background a paint or nothing; a member's patched fills paints too.
+    if (state['background'] !== undefined) state['background'] = completePaint(state['background'], null, assets)
   })
   object['states'] = usable
 
@@ -171,6 +362,14 @@ function completeFrame(object: Record<string, unknown>): void {
       }
       for (const key of Object.keys(patch as object)) {
         if (!MEMBER_VALUE_KEYS.includes(key as never)) delete (patch as Record<string, unknown>)[key]
+      }
+      const appearance = (patch as Record<string, unknown>)['appearance']
+      if (appearance && typeof appearance === 'object') {
+        const paints = appearance as Record<string, unknown>
+        if ('textFill' in paints) paints['textFill'] = completePaint(paints['textFill'], '#101014', assets) ?? '#101014'
+        if ('containerFill' in paints) paints['containerFill'] = completePaint(paints['containerFill'], null, assets)
+        if ('lineFill' in paints) paints['lineFill'] = completePaint(paints['lineFill'], null, assets)
+        if ('containerStroke' in paints) completeStrokePaint(paints['containerStroke'], assets)
       }
     }
   }
@@ -274,7 +473,7 @@ function forEachMesh(raw: Record<string, unknown>, fn: (o: Record<string, unknow
  * shape. Positions a state lacks are taken from the first state that has
  * them, so every state names every node.
  */
-function completeMesh(object: Record<string, unknown>): void {
+function completeMesh(object: Record<string, unknown>, assets: Set<string> = new Set()): void {
   if (typeof object['snapStep'] !== 'number') object['snapStep'] = MOSAIC_DEFAULT_SNAP
   if (!Array.isArray(object['nodes'])) object['nodes'] = []
   if (!Array.isArray(object['tiles'])) object['tiles'] = []
@@ -292,7 +491,7 @@ function completeMesh(object: Record<string, unknown>): void {
   if (usable.length === 0) usable.push({ nodes: {}, glyphColour: {}, tileColour: {}, background: null })
 
   usable.forEach((state, at) => {
-    completeState(state, at, tileIds)
+    completeState(state, at, tileIds, assets)
     delete state['x']
     delete state['y']
     if (typeof state['outerPadding'] !== 'number') state['outerPadding'] = 0
@@ -402,6 +601,7 @@ function completeState(
   state: Record<string, unknown>,
   at: number,
   tiles: ReadonlySet<string>,
+  assets: Set<string>,
 ): void {
   if (typeof state['id'] !== 'string' || !state['id']) state['id'] = `ms_recovered_${at}`
   /*
@@ -463,17 +663,14 @@ function completeState(
       state[key] = {}
       continue
     }
-    const kept: Record<string, string> = {}
+    const kept: Record<string, string | Record<string, unknown>> = {}
     for (const [leaf, value] of Object.entries(map as Record<string, unknown>)) {
       if (!tiles.has(leaf)) continue
       if (value === null) continue
-      if (typeof value === 'string' && parseHex(value)) {
-        kept[leaf] = value
-        continue
-      }
-      // Not a colour at all. A letter falls back to the default so it still
+      // Not a paint at all: a letter falls back to the default so it still
       // draws; a background has no default to fall back to, so it goes.
-      if (fallback !== null) kept[leaf] = fallback
+      const paint = completePaint(value, fallback, assets)
+      if (paint !== null) kept[leaf] = paint
     }
     state[key] = kept
   }
@@ -487,9 +684,9 @@ function completeState(
    * described. Documents written before v26 have no field here at all, and that
    * is exactly the "no backdrop" answer.
    */
-  const backdrop = state['background']
-  state['background'] =
-    typeof backdrop === 'string' && parseHex(backdrop) ? backdrop : null
+  state['background'] = completePaint(state['background'], null, assets)
+  completeStrokePaint(state['stroke'], assets)
+  if (state['lines']) completeStrokePaint(state['lines'], assets)
 
   // Font and spacing are per state from v23. A state without them is one the
   // migration never reached, which the version number alone cannot rule out.
@@ -544,7 +741,7 @@ function noteFallbackFont(raw: Record<string, unknown>): void {
   if (font && typeof font['fontId'] === 'string') fallbackFont = { ...font }
 }
 
-function completeMosaic(object: Record<string, unknown>): void {
+function completeMosaic(object: Record<string, unknown>, assets: Set<string> = new Set()): void {
   if (typeof object['snapStep'] !== 'number') object['snapStep'] = MOSAIC_DEFAULT_SNAP
 
   /*
@@ -562,7 +759,7 @@ function completeMosaic(object: Record<string, unknown>): void {
       .map((tile) => tile['id'])
       .filter((id): id is string => typeof id === 'string'),
   )
-  usable.forEach((each, at) => completeState(each as Record<string, unknown>, at, tileIds))
+  usable.forEach((each, at) => completeState(each as Record<string, unknown>, at, tileIds, assets))
   object['states'] = usable
   delete object['activeState']
   const seed = object['seed'] as Record<string, unknown> | undefined
@@ -577,6 +774,24 @@ function completeMosaic(object: Record<string, unknown>): void {
 }
 
 export const migrations: Record<number, MigrationFn> = {
+  /*
+   * v31 -> v32: one paint everywhere, and the gradient is a paint.
+   *
+   * A gradient used to be a colour EFFECT on a shape's type or body — a
+   * setting beside the resting colour, resolved over it. Now it is the fill
+   * itself, with its motion carried along, and every other fill in the
+   * document may be one too. Each shape's gradient effect becomes the paint
+   * of the part it coloured, and the effect goes back to none; the picture
+   * is the same at rest and in motion. Pictures arrive with this version as
+   * well, so the document gains a place to keep them.
+   */
+  31: (raw) => {
+    if (!raw['assets'] || typeof raw['assets'] !== 'object') raw['assets'] = {}
+    forEachFrame(raw, (frame) => foldMemberGradients(frame))
+    forEachTypography(raw, (object) => foldGradientEffects(object))
+    return raw
+  },
+
   /*
    * v29 -> v30: a gradient is its own list of stops.
    *
@@ -1454,9 +1669,12 @@ export function deserializeDocument(raw: string): DeserializeResult {
    * ever fills gaps — a complete document goes through untouched.
    */
   noteFallbackFont(data)
-  forEachMosaic(data, completeMosaic)
-  forEachMesh(data, completeMesh)
-  forEachFrame(data, completeFrame)
+  if (!data.assets || typeof data.assets !== 'object') data.assets = {}
+  const assets = assetIdsOf(data)
+  forEachMosaic(data, (object) => completeMosaic(object, assets))
+  forEachMesh(data, (object) => completeMesh(object, assets))
+  forEachFrame(data, (object) => completeFrame(object, assets))
+  forEachTypography(data, (object) => completeTypographyPaints(object, assets))
 
   const validation = validateDocument(data)
   if (!validation.ok) return { ok: false, error: validation.error }
@@ -1496,6 +1714,25 @@ export function validateDocument(data: Record<string, unknown>): ValidationOutco
   }
   for (const id of Object.keys(objects)) {
     if (!seen.has(id)) return { ok: false, error: `Object ${id} is missing from the object order.` }
+  }
+
+  const assets = data.assets as Record<string, unknown> | undefined
+  if (!assets || typeof assets !== 'object') return { ok: false, error: 'Missing assets.' }
+  for (const [id, asset] of Object.entries(assets)) {
+    const a = asset as Record<string, unknown> | null
+    if (
+      !a ||
+      typeof a !== 'object' ||
+      a['id'] !== id ||
+      typeof a['src'] !== 'string' ||
+      !a['src'].startsWith('data:image/') ||
+      typeof a['width'] !== 'number' ||
+      !(a['width'] > 0) ||
+      typeof a['height'] !== 'number' ||
+      !(a['height'] > 0)
+    ) {
+      return { ok: false, error: `Asset ${id} is not a picture.` }
+    }
   }
 
   if (!data.defaults) data.defaults = documentDefaults

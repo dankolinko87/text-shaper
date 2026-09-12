@@ -1,5 +1,6 @@
 import type { PositionedStroke, Rect, Stroke, StrokePosition } from '../types/document'
-import { mixColours, withAlpha } from '../typography/colour'
+import { blendPaint, fadedPaint, samePaint } from '../typography/paint'
+import type { StrokePaint } from '../types/paint'
 
 /**
  * The arithmetic a border needs, with nothing that draws.
@@ -81,8 +82,8 @@ export function dashArrayFor(stroke: Stroke | null): number[] | null {
  */
 export function blendStroke<T extends Stroke>(a: T | null, b: T | null, t: number): T | null {
   if (!a && !b) return null
-  if (a && !b) return { ...a, colour: mixColours(a.colour, withAlpha(a.colour, 0), t) }
-  if (!a && b) return { ...b, colour: mixColours(withAlpha(b.colour, 0), b.colour, t) }
+  if (a && !b) return { ...a, colour: (blendPaint(a.colour, fadedPaint(a.colour), t) ?? a.colour) as StrokePaint }
+  if (!a && b) return { ...b, colour: (blendPaint(fadedPaint(b.colour), b.colour, t) ?? b.colour) as StrokePaint }
 
   const from = a as T
   const to = b as T
@@ -95,7 +96,7 @@ export function blendStroke<T extends Stroke>(a: T | null, b: T | null, t: numbe
    */
   return {
     ...(t < 0.5 ? from : to),
-    colour: mixColours(from.colour, to.colour, t),
+    colour: (blendPaint(from.colour, to.colour, t) ?? from.colour) as StrokePaint,
     width: from.width + (to.width - from.width) * t,
   }
 }
@@ -116,7 +117,7 @@ export function sameStroke(
   tolerance = 1e-9,
 ): boolean {
   if (a === null || b === null) return a === b
-  if (a.colour !== b.colour) return false
+  if (!samePaint(a.colour, b.colour)) return false
   if (positionOf(a) !== positionOf(b)) return false
   if (Math.abs(a.width - b.width) > tolerance) return false
   if ((a.dash === null) !== (b.dash === null)) return false

@@ -1,3 +1,5 @@
+import { fillOf } from './paintFill'
+import { glyphBox, imageOpacity } from './renderer'
 import { layoutMosaic } from '../mosaic/layout'
 import { placeInk } from '../mosaic/glyphFit'
 import type { EvaluatedMosaicFrame } from '../mosaic/timeline'
@@ -162,7 +164,10 @@ export function paintMosaicFrame(
      * mosaic's, and only the outer radius (a clip on the group) changes.
      */
     if (role === 'extent') {
-      child.set({ fill: frame.background ?? (child.get('restFill') as string | undefined) ?? 'transparent' })
+      child.set({
+        fill: fillOf(frame.background, (child.get('restFill') as string | undefined) ?? 'transparent', { size: bounds }),
+        opacity: imageOpacity(frame.background),
+      })
       continue
     }
 
@@ -191,7 +196,8 @@ export function paintMosaicFrame(
         // A fill, not a rebuild. Every tile has an object whether or not it has
         // a colour, so a background can fade in without the group being torn
         // down mid-transition.
-        fill: colour ?? 'transparent',
+        fill: fillOf(colour, 'transparent', { size: rect }),
+        opacity: imageOpacity(colour),
       })
       child.setCoords?.()
       continue
@@ -234,7 +240,12 @@ export function paintMosaicFrame(
       scaleX: Math.max(0, rect.width) / reference.width,
       scaleY: Math.max(0, rect.height) / reference.height,
       // The letter's colour is a fill too: no path is written again for it.
-      fill: frame.glyphColours[leafId] ?? DEFAULT_GLYPH_COLOUR,
+      fill: fillOf(
+        frame.glyphColours[leafId] ?? DEFAULT_GLYPH_COLOUR,
+        'transparent',
+        box ? glyphBox(reference, box) : { size: reference },
+      ),
+      opacity: imageOpacity(frame.glyphColours[leafId]),
     })
     child.setCoords?.()
   }

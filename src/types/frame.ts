@@ -1,7 +1,7 @@
 import type { Easing } from '../anim/easing'
+import type { Paint } from './paint'
 import type {
   AppearanceSettings,
-  ColorValue,
   DocumentObject,
   FittingMode,
   FontSettings,
@@ -117,7 +117,7 @@ export interface FrameState {
    * other colour — and it is the one thing in a frame that belongs to no member,
    * which is why it lives here beside the values rather than inside them.
    */
-  background?: ColorValue | null
+  background?: Paint | null
   /** By member id. A member with no entry sits at its own resting values. */
   values: Record<string, MemberValues>
   holdMs: number

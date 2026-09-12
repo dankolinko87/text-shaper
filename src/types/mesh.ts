@@ -1,3 +1,4 @@
+import type { Paint } from './paint'
 import type { Easing } from '../anim/easing'
 import type { OutlinePatch } from '../geometry/patch'
 import type { FontSettings, PositionedStroke, Rect, Stroke, Vec2 } from './document'
@@ -60,11 +61,11 @@ export interface MeshState {
   /** Where every node sits, in the object's local units. Every state names every node. */
   nodes: Record<string, Vec2>
   /** By tile id. */
-  glyphColour: Record<string, string>
+  glyphColour: Record<string, Paint>
   /** By tile id. Null draws no background at all, which is not the same as white. */
-  tileColour: Record<string, string | null>
-  /** Behind the whole composition, gaps included; null is no backdrop. */
-  background: string | null
+  tileColour: Record<string, Paint | null>
+  /** Behind the whole composition, gaps included; null is no background. */
+  background: Paint | null
   /** The silhouette's own edge, along the rim of the mesh; null draws none. */
   stroke: PositionedStroke | null
   /**
@@ -158,4 +159,7 @@ export interface MeshTileLayout {
   cornerIndices: [number, number, number, number]
   rect: Rect | null
   patch: OutlinePatch | null
+  /** The same two tiers over `visible`, worked out on first use by `cellMap`. */
+  visibleRect?: Rect | null
+  visiblePatch?: OutlinePatch | null
 }

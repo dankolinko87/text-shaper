@@ -1,3 +1,4 @@
+import { svgPaints } from './svgPaint'
 import { useMemo, type ReactElement } from 'react'
 
 import { strokeBand, strokeReach } from '../geometry/stroke'
@@ -94,6 +95,7 @@ function draw(object: LetterMosaicObject, at: number, state: MosaicState) {
 
   const band =
     state.stroke && state.stroke.width > 0 ? strokeBand(box, outer, state.stroke) : null
+  const paints = svgPaints(`thumb-${object.id}-${at}`, useDocumentStore.getState().doc.assets)
 
   const cells: ReactElement[] = []
   for (const tile of object.tiles) {
@@ -110,7 +112,7 @@ function draw(object: LetterMosaicObject, at: number, state: MosaicState) {
           width={layout.visible.width}
           height={layout.visible.height}
           rx={fit(corners.tileRadius, layout.visible.width, layout.visible.height)}
-          fill={fill}
+          fill={paints.fill(fill, layout.visible)}
         />,
       )
     }
@@ -133,13 +135,14 @@ function draw(object: LetterMosaicObject, at: number, state: MosaicState) {
       <path
         key={`g-${tile.id}`}
         d={data}
-        fill={state.glyphColour[tile.id] ?? DEFAULT_GLYPH_COLOUR}
+        fill={paints.fill(state.glyphColour[tile.id] ?? DEFAULT_GLYPH_COLOUR, rect)}
       />,
     )
   }
 
   return (
     <>
+      <defs>{paints.defs()}</defs>
       {outer > 0 ? (
         <defs>
           <clipPath id={clip}>
@@ -155,7 +158,7 @@ function draw(object: LetterMosaicObject, at: number, state: MosaicState) {
             y={box.y}
             width={box.width}
             height={box.height}
-            fill={state.background}
+            fill={paints.fill(state.background, box)}
           />
         ) : null}
         {cells}
@@ -179,7 +182,7 @@ function draw(object: LetterMosaicObject, at: number, state: MosaicState) {
           height={band.box.height}
           rx={band.radius}
           fill="none"
-          stroke={state.stroke.colour}
+          stroke={paints.fill(state.stroke.colour)}
           strokeWidth={state.stroke.width}
           strokeDasharray={
             state.stroke.dash ? `${state.stroke.dash.length} ${state.stroke.dash.gap}` : undefined

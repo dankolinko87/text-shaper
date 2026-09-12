@@ -1,3 +1,5 @@
+import { solidOf } from '../typography/paint'
+import { paintCss } from './gradientCss'
 import { useCallback, useRef, useState } from 'react'
 
 import { Icon } from '../components/Icon'
@@ -51,7 +53,7 @@ export function TilePicker({ object, at }: { object: Tiled; at: number }) {
    * near-black square and the list read as empty boxes.
    */
   const groundFor = (id: string): string =>
-    state?.tileColour[id] ?? state?.background ?? page
+    paintCss(state?.tileColour[id] ?? state?.background ?? page)
 
   const label =
     selection.length === 0
@@ -118,7 +120,7 @@ export function TilePicker({ object, at }: { object: Tiled; at: number }) {
                     data-on={chosen.has(id)}
                     style={{
                       background: groundFor(id),
-                      color: state?.glyphColour[id] ?? DEFAULT_GLYPH_COLOUR,
+                      color: solidOf(state?.glyphColour[id] ?? DEFAULT_GLYPH_COLOUR),
                     }}
                     onClick={(e) => pick(id, e.shiftKey)}
                   >

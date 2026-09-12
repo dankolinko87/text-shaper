@@ -1,6 +1,10 @@
 import { useMemo, useState } from 'react'
 
-import { Button, ColorField, SegmentedControl, Slider, StrokeField } from '../components/controls'
+import { Button, SegmentedControl, Slider, StrokeField } from '../components/controls'
+import { PaintField, strokePaintField } from './PaintField'
+import { beginCrop, cropTargetFor } from './cropTargets'
+import { samePaint } from '../typography/paint'
+import type { Paint } from '../types/paint'
 import { Icon } from '../components/Icon'
 import { FONTS } from '../fonts/manifest'
 import { DEFAULT_OUTLINE, DEFAULT_STROKE } from '../geometry/stroke'
@@ -15,7 +19,7 @@ import type { MeshObject, PositionedStroke } from '../types/document'
 import { MESH_DEFAULT_CORNERS, MESH_DEFAULT_SPACING, MESH_MAX_SIDE } from '../types/mesh'
 import { DEFAULT_GLYPH_COLOUR } from '../types/mosaic'
 import { GridSizeField } from './GridSizeField'
-import { ColourChip, Section, StrokeChip } from './Section'
+import { PaintChip, Section, StrokeChip } from './Section'
 import { StatedBackgroundField } from './StatedBackgroundField'
 import { StateTimingFields } from './StateTimingFields'
 import { TilePicker } from './TilePicker'
@@ -86,7 +90,7 @@ export function MeshSettings({ object }: { object: MeshObject }) {
         <StatedBackgroundField object={object} />
         {/* The whole box behind the mesh, as a mosaic has — or a backdrop cut to the tiles' rim. */}
         <SegmentedControl<'box' | 'silhouette'>
-          label="Backdrop fills"
+          label="Background fills"
           value={object.backdrop}
           options={[
             { value: 'box', label: 'Whole frame' },
@@ -134,16 +138,16 @@ function useMeshColours(object: MeshObject, at: number) {
   const targets = useMemo(() => meshColourTargets(object, at, selection), [object, at, selection])
 
   const read = (
-    of: (leaf: string) => string | null,
-  ): { value: string; mixed: boolean; anyColoured: boolean } => {
+    of: (leaf: string) => Paint | null,
+  ): { value: Paint | null; mixed: boolean; anyColoured: boolean } => {
     if (!state || targets.length === 0) {
       return { value: DEFAULT_GLYPH_COLOUR, mixed: false, anyColoured: false }
     }
     const seen = targets.map(of)
     const first = seen[0] ?? null
     return {
-      value: (first ?? '#ffffffff') as string,
-      mixed: seen.some((each) => each !== first),
+      value: first,
+      mixed: seen.some((each) => !samePaint(each, first)),
       anyColoured: seen.some((each) => each !== null),
     }
   }
@@ -199,22 +203,23 @@ export function MeshStatePanel({ object, at }: { object: MeshObject; at: number 
     <>
       <Section
         title="Tiles"
-        summary={<ColourChip value={background.mixed ? null : background.value} />}
+        summary={<PaintChip value={background.mixed ? null : background.value} />}
         open={isOpen('tiles')}
         onToggle={toggle('tiles')}
       >
         <TilePicker object={object} at={at} />
-        <ColorField
+        <PaintField
           label="Background"
           value={background.value}
           mixed={background.mixed || (!background.anyColoured && targets.length > 0)}
           disabled={locked}
-          onChange={(colour) => store().setMosaicTileColour(object.id, at, targets, colour)}
-          onCommit={commitWith('Colour tiles')}
+          onChange={(paint) => store().setMosaicTileColour(object.id, at, targets, paint)}
+          onCommit={(label) => store().commit(label)}
+          onCrop={() => beginCrop(cropTargetFor(object.id, 'tile', at, targets))}
           removeLabel="Clear background"
           onRemove={() => {
             store().setMosaicTileColour(object.id, at, targets, null)
-            store().commit('Clear tile colour')
+            store().commit('Clear tile background')
           }}
         />
         <Slider
@@ -297,13 +302,14 @@ export function MeshStatePanel({ object, at }: { object: MeshObject; at: number 
             character {family} cannot draw.
           </p>
         ) : null}
-        <ColorField
-          label="Colour"
+        <PaintField
+          label="Fill"
           value={letter.value}
           mixed={letter.mixed}
           disabled={locked}
-          onChange={(colour) => store().setMosaicGlyphColour(object.id, at, targets, colour)}
-          onCommit={commitWith('Colour letters')}
+          onChange={(paint) => store().setMosaicGlyphColour(object.id, at, targets, paint)}
+          onCommit={(label) => store().commit(label)}
+          onCrop={() => beginCrop(cropTargetFor(object.id, 'glyph', at, targets))}
         />
         <Slider
           label="Inset"
@@ -318,32 +324,25 @@ export function MeshStatePanel({ object, at }: { object: MeshObject; at: number 
       </Section>
 
       <Section
-        title="Backdrop"
-        summary={<ColourChip value={backdrop} />}
+        title="Background"
+        summary={<PaintChip value={backdrop} />}
         open={isOpen('backdrop')}
         onToggle={toggle('backdrop')}
       >
-        <ColorField
-          label="Colour"
-          value={backdrop ?? '#ffffffff'}
-          mixed={backdrop === null}
+        <PaintField
+          label="Background"
+          value={backdrop}
           emptyLabel="None"
           disabled={previewing}
-          onChange={(colour) => store().setMosaicBackground(object.id, at, colour)}
-          onCommit={commitWith('Colour backdrop')}
+          onChange={(paint) => store().setMosaicBackground(object.id, at, paint)}
+          onCommit={(label) => store().commit(label)}
+          onCrop={() => beginCrop(cropTargetFor(object.id, 'background', at))}
+          removeLabel="Clear background"
+          onRemove={() => {
+            store().setMosaicBackground(object.id, at, null)
+            store().commit('Clear background')
+          }}
         />
-        <div className="field">
-          <Button
-            variant="ghost"
-            disabled={previewing || backdrop === null}
-            onClick={() => {
-              store().setMosaicBackground(object.id, at, null)
-              store().commit('Clear backdrop')
-            }}
-          >
-            Clear backdrop
-          </Button>
-        </div>
         {/* How far the backdrop and the silhouette reach past the rim — where a backdrop shows once the tiles are filled. */}
         <Slider
           label="Padding"
@@ -399,6 +398,7 @@ export function MeshStatePanel({ object, at }: { object: MeshObject; at: number 
         <StrokeField
           value={state.stroke ?? null}
           defaults={DEFAULT_OUTLINE}
+          paint={strokePaintField}
           disabled={previewing}
           onChange={(next) => store().setMosaicStroke(object.id, at, next as PositionedStroke | null)}
           onCommit={(label) => store().commit(label)}
@@ -409,6 +409,7 @@ export function MeshStatePanel({ object, at }: { object: MeshObject; at: number 
           addLabel="Add lines"
           value={state.lines ?? null}
           defaults={DEFAULT_STROKE}
+          paint={strokePaintField}
           positions={false}
           disabled={previewing}
           onChange={(next) =>
