@@ -1,4 +1,4 @@
-import { Circle, Line, Polyline, Rect, type Canvas as FabricCanvas, type FabricObject } from 'fabric'
+import { Circle, Line, Polygon, Polyline, Rect, type Canvas as FabricCanvas, type FabricObject } from 'fabric'
 import { useEffect, useRef, useState } from 'react'
 
 import { objectToArtboard } from '../geometry/objectSpace'
@@ -6,9 +6,13 @@ import { IDENTITY, applyToPoint, applyToVector, invert, multiply } from '../geom
 import {
   insertNodeOn,
   moveHandle,
-  moveNode,
+  moveNodes,
+  nodesInPolygon,
+  nodesWithin,
   outlineToPath,
   removeNode,
+  removeNodes,
+  sameRef,
   toggleSmooth,
   type NodeRef,
 } from '../geometry/outline'
@@ -18,6 +22,9 @@ import { typographyById, useDocumentStore } from '../state/documentStore'
 import { useUiStore } from '../state/uiStore'
 import { valuesFor } from '../frame/frame'
 import { frameTargetFor } from './memberEdits'
+import { constrain } from './penModel'
+import { SNAP_RADIUS, constrainLock, snapPoint, type SnapGuide } from './pointSnap'
+import { isTextEntry } from './useShortcuts'
 import type { PathOutline, Transform2D, TypographyObject, Vec2 } from '../types/document'
 import { pathContainsPoint } from '../geometry/path'
 
@@ -34,6 +41,11 @@ const GUIDE_SPACING = 3
 const DRAG_THRESHOLD = 3
 /** How near the line a double-click must land to add a point to it, in screen pixels. */
 const CURVE_HIT_RADIUS = 8
+/** How far a guide line runs past the points it joins, in screen pixels. */
+const GUIDE_OVERSHOOT = 24
+/** An arrow key moves a point this far, in artboard units; ten times that with Shift. */
+const NUDGE = 1
+const NUDGE_BIG = 10
 
 /** A node marker's four states, and what each one looks like. */
 interface NodeStyle {
@@ -106,12 +118,31 @@ interface Grab {
   /** A handle drag names its side; a node drag has none. */
   side: 'in' | 'out' | null
   from: Vec2
-  /** The handle as it was when the press landed, so the drag is relative. */
+  /** The handle (or anchor) as it was when the press landed, so the drag is relative. */
   was: Vec2
+  /** Every anchor that moves with this one: the picked set, the grabbed one included. */
+  refs: NodeRef[]
+  /** Shift on a point already picked: a click takes it out of the set, a drag moves the set. */
+  dropOnClick: boolean
   engaged: boolean
   /** Alt was down: this drag breaks the point rather than turning both sides. */
   breaking: boolean
 }
+
+/** A press on empty canvas, held: a box — or, with Alt, a lasso — to pick the points inside. */
+interface Marquee {
+  from: Vec2
+  /** Shift was down: the sweep adds to the picked set rather than replacing it. */
+  add: boolean
+  /** Alt was down: a freeform loop rather than a box. */
+  lasso: boolean
+  /** Everywhere the lasso has been, artboard units. */
+  trail: Vec2[]
+  band: FabricObject | null
+}
+
+const includesRef = (refs: readonly NodeRef[], ref: NodeRef): boolean =>
+  refs.some((each) => sameRef(each, ref))
 
 /**
  * A path's own points, on screen and editable.
@@ -128,11 +159,17 @@ interface Grab {
  *
  * The interaction is Figma's, and the same for a line and a shape: a click
  * selects the object to move and turn, a double-click goes INSIDE it to the
- * points, and clicking a point reveals the two handles that shape the curve
- * either side of it. Drag a point to move it, drag a handle to bend the curve.
+ * points, and clicking a point picks it and reveals the two handles that shape
+ * the curve either side of it. Shift-click picks more; a drag on empty canvas
+ * boxes points in, an Alt-drag lassoes them (Shift adds either way). Drag a
+ * picked point and every picked point
+ * moves with it; Shift holds the drag to an axis or a diagonal, and a point
+ * snaps to line up with the path's other points, a guide drawn through them —
+ * hold ⌘ to drag free of that. Arrows nudge the picked points by one unit,
+ * ten with Shift; Delete takes them away. Drag a handle to bend the curve.
  * Alt-click a point to switch it between a corner and a smooth point; Alt-drag a
  * handle to break the smooth one. Double-click a point to take it away, or the
- * curve to put one where you clicked. Escape leaves.
+ * curve to put one where you clicked. Escape drops the pick, then leaves.
  *
  * Square markers are corners and round ones are smooth, which is the convention
  * every vector editor shares.
@@ -156,15 +193,21 @@ export function PathLayer({ canvas, object, host }: PathLayerProps) {
    */
   const outlineRef = useRef<PathOutline | null>(null)
   const grabRef = useRef<Grab | null>(null)
+  const marqueeRef = useRef<Marquee | null>(null)
+  /** The guide lines a snap is showing, until the drag ends. */
+  const guidesRef = useRef<FabricObject[]>([])
 
   /**
-   * Which node has its handles showing.
+   * Which nodes are picked — their handles show, and they move as one.
    *
-   * State rather than a ref: revealing the handles has to redraw the overlay,
-   * which is the one piece of this component's gesture handling that the user
-   * sees change without anything being written to the document.
+   * State rather than a ref: picking has to redraw the overlay, which is the
+   * one piece of this component's gesture handling that the user sees change
+   * without anything being written to the document. Mirrored into a ref for
+   * the handlers, which never re-register.
    */
-  const [revealed, setRevealed] = useState<NodeRef | null>(null)
+  const [picked, setPicked] = useState<NodeRef[]>([])
+  const pickedRef = useRef<NodeRef[]>([])
+  pickedRef.current = picked
   /**
    * What the pointer is over, if anything.
    *
@@ -201,8 +244,17 @@ export function PathLayer({ canvas, object, host }: PathLayerProps) {
   useEffect(() => {
     if (active) return
     setHovered(null)
-    setRevealed(null)
+    setPicked([])
   }, [active])
+
+  /* A pick that names a node the outline no longer has is dropped. */
+  useEffect(() => {
+    if (!outline) return
+    setPicked((was) => {
+      const kept = was.filter((ref) => Boolean(outline.subpaths[ref.subpath]?.nodes[ref.node]))
+      return kept.length === was.length ? was : kept
+    })
+  }, [outline])
 
   /* Draw the overlay. */
   useEffect(() => {
@@ -289,7 +341,7 @@ export function PathLayer({ canvas, object, host }: PathLayerProps) {
         // Hovering a HANDLE must not light its anchor up as well: they are two
         // different things to grab, and saying so is the whole point.
         const style = nodeStyle(
-          sameNode(ref, revealed),
+          includesRef(picked, ref),
           hovered?.side === null && sameNode(ref, hovered),
         )
         const size = radius * style.scale
@@ -318,14 +370,15 @@ export function PathLayer({ canvas, object, host }: PathLayerProps) {
     })
 
     /*
-     * The revealed node's handles, drawn LAST so they sit above every anchor.
+     * The picked nodes' handles, drawn LAST so they sit above every anchor.
      *
-     * Only one node's at a time. Showing every handle on a path at once is a
+     * Only the picked ones. Showing every handle on a path at once is a
      * thicket you cannot aim into, and it is not what the user asked to see:
-     * they clicked one point.
+     * they picked these points.
      */
-    const node = revealed ? outline.subpaths[revealed.subpath]?.nodes[revealed.node] : null
-    if (node && revealed) {
+    for (const ref of picked) {
+      const node = outline.subpaths[ref.subpath]?.nodes[ref.node]
+      if (!node) continue
       const anchor = toArtboard(node.point)
       for (const side of ['in', 'out'] as const) {
         const handle = side === 'in' ? node.handleIn : node.handleOut
@@ -340,7 +393,7 @@ export function PathLayer({ canvas, object, host }: PathLayerProps) {
             strokeWidth: 1,
           }),
         )
-        const warm = hovered?.side === side && sameNode(revealed, hovered)
+        const warm = hovered?.side === side && sameNode(ref, hovered)
         const dot = new Circle({
           ...shared,
           left: tip.x,
@@ -353,7 +406,7 @@ export function PathLayer({ canvas, object, host }: PathLayerProps) {
           strokeWidth: 1.5 / zoom,
         })
         dot.set('gridRole', 'nodeHandle')
-        dot.set('nodeRef', revealed)
+        dot.set('nodeRef', ref)
         dot.set('handleSide', side)
         add(dot)
       }
@@ -361,11 +414,11 @@ export function PathLayer({ canvas, object, host }: PathLayerProps) {
 
     canvas.requestRenderAll()
     return clear
-  }, [canvas, active, object, outline, revealed, hovered])
+  }, [canvas, active, object, outline, picked, hovered])
 
   /* Keep the live values the handlers read, without re-registering them. */
-  const liveRef = useRef({ object, active, revealed, hovered, toObjectMat })
-  liveRef.current = { object, active, revealed, hovered, toObjectMat }
+  const liveRef = useRef({ object, active, hovered, toObjectMat, toArtboardMat })
+  liveRef.current = { object, active, hovered, toObjectMat, toArtboardMat }
 
   useEffect(() => {
     if (!canvas) return
@@ -416,7 +469,19 @@ export function PathLayer({ canvas, object, host }: PathLayerProps) {
       // Scene units, not page ones — the same conversion the grid editor makes.
       const scene = canvas.getScenePoint(opt.e as MouseEvent)
       const found = hit(scene)
-      if (!found) return
+      const shift = (opt.e as MouseEvent).shiftKey === true
+      if (!found) {
+        /*
+         * Empty canvas: a box to pick points with, or a click to drop them.
+         *
+         * Nothing else can take this press — while a shape's points are being
+         * edited the canvas finds no targets and starts no marquee of its own,
+         * so a press that misses every point is this layer's to answer.
+         */
+        const alt = (opt.e as MouseEvent).altKey === true
+        marqueeRef.current = { from: scene, add: shift, lasso: alt, trail: [scene], band: null }
+        return
+      }
 
       const alt = (opt.e as MouseEvent).altKey === true
 
@@ -433,13 +498,28 @@ export function PathLayer({ canvas, object, host }: PathLayerProps) {
             ? 'Make corner'
             : 'Make smooth')
         }
-        setRevealed(found.ref)
+        setPicked([found.ref])
         return
       }
 
-      // Clicking an anchor is what reveals its handles. Clicking a handle keeps
-      // whatever is already revealed — it belongs to that node.
-      if (!found.side) setRevealed(found.ref)
+      /*
+       * Clicking an anchor picks it. Shift adds it to the picked set, or — on
+       * release, if the press never became a drag — takes it out; a plain
+       * click on one already picked keeps the set. Either way a drag from a
+       * picked point moves all of them. Clicking a handle keeps whatever is
+       * picked — it belongs to one of those nodes.
+       */
+      let refs = pickedRef.current
+      let dropOnClick = false
+      if (!found.side) {
+        if (shift) {
+          if (includesRef(refs, found.ref)) dropOnClick = true
+          else refs = [...refs, found.ref]
+        } else if (!includesRef(refs, found.ref)) {
+          refs = [found.ref]
+        }
+        if (refs !== pickedRef.current) setPicked(refs)
+      }
 
       const node = target.outline.subpaths[found.ref.subpath]?.nodes[found.ref.node]
       if (!node) return
@@ -458,9 +538,51 @@ export function PathLayer({ canvas, object, host }: PathLayerProps) {
         side: found.side,
         from: scene,
         was: { ...was },
+        refs: found.side ? [found.ref] : refs,
+        dropOnClick,
         engaged: false,
         breaking: alt,
       }
+    }
+
+    /** Draw the lines a snap lines up with, replacing whatever was showing. */
+    const showGuides = (guides: readonly SnapGuide[], through: Vec2): void => {
+      for (const shape of guidesRef.current) canvas.remove(shape)
+      guidesRef.current = []
+      const zoom = canvas.getZoom() || 1
+      const { toArtboardMat } = liveRef.current
+      for (const guide of guides) {
+        // Every point on the line, on the artboard: the snapped point and the
+        // ones it lines up with. The line runs between the outermost of them.
+        const along = [through, ...guide.through].map((p) => applyToPoint(toArtboardMat, p))
+        const other = guide.axis === 'x' ? 'y' : 'x'
+        const lows = along.map((p) => p[other])
+        const low = Math.min(...lows) - GUIDE_OVERSHOOT / zoom
+        const high = Math.max(...lows) + GUIDE_OVERSHOOT / zoom
+        const fixed = applyToPoint(toArtboardMat, through)[guide.axis]
+        const coords: [number, number, number, number] =
+          guide.axis === 'x' ? [fixed, low, fixed, high] : [low, fixed, high, fixed]
+        const line = new Line(coords, {
+          selectable: false,
+          evented: false,
+          objectCaching: false,
+          excludeFromExport: true,
+          stroke: LINE_COLOR,
+          strokeWidth: 1 / zoom,
+          strokeDashArray: [4 / zoom, 3 / zoom],
+          opacity: 0.9,
+        })
+        line.set('gridRole', 'snapGuide')
+        canvas.add(line)
+        guidesRef.current.push(line)
+      }
+      canvas.requestRenderAll()
+    }
+    const hideGuides = (): void => {
+      if (guidesRef.current.length === 0) return
+      for (const shape of guidesRef.current) canvas.remove(shape)
+      guidesRef.current = []
+      canvas.requestRenderAll()
     }
 
     const onMove = (opt: { e: Event }): void => {
@@ -476,6 +598,56 @@ export function PathLayer({ canvas, object, host }: PathLayerProps) {
        * passing over, and lighting those up as the pointer sweeps them is noise
        * about something that is not going to happen.
        */
+      const marquee = marqueeRef.current
+      if (marquee && target) {
+        const zoom = canvas.getZoom() || 1
+        if (!marquee.band) {
+          const moved = Math.hypot(scene.x - marquee.from.x, scene.y - marquee.from.y)
+          if (moved * zoom < DRAG_THRESHOLD) return
+        }
+        const sweep = {
+          selectable: false,
+          evented: false,
+          objectCaching: false,
+          excludeFromExport: true,
+          fill: LINE_COLOR,
+          opacity: 0.12,
+          stroke: LINE_COLOR,
+          strokeWidth: 1 / zoom,
+          strokeUniform: true,
+        } as const
+        if (marquee.lasso) {
+          // The loop as drawn, closed back to its start, redrawn from the trail
+          // each move — a polygon owns its points once it has them.
+          marquee.trail.push(scene)
+          if (marquee.band) canvas.remove(marquee.band)
+          const loop = new Polygon(
+            marquee.trail.map((p) => ({ x: p.x, y: p.y })),
+            { ...sweep, strokeDashArray: [4 / zoom, 3 / zoom] },
+          )
+          loop.set('gridRole', 'nodeMarquee')
+          canvas.add(loop)
+          marquee.band = loop
+          canvas.requestRenderAll()
+          return
+        }
+        if (!marquee.band) {
+          const band = new Rect({ ...sweep, originX: 'center', originY: 'center' })
+          band.set('gridRole', 'nodeMarquee')
+          canvas.add(band)
+          marquee.band = band
+        }
+        marquee.band.set({
+          left: (marquee.from.x + scene.x) / 2,
+          top: (marquee.from.y + scene.y) / 2,
+          width: Math.abs(scene.x - marquee.from.x),
+          height: Math.abs(scene.y - marquee.from.y),
+        })
+        marquee.band.setCoords()
+        canvas.requestRenderAll()
+        return
+      }
+
       if (!grab) {
         if (liveRef.current.active) {
           const over = hit(scene)
@@ -485,6 +657,9 @@ export function PathLayer({ canvas, object, host }: PathLayerProps) {
       }
       if (!target || !held) return
 
+      const shift = (opt.e as MouseEvent).shiftKey === true
+      const free = (opt.e as MouseEvent).metaKey === true || (opt.e as MouseEvent).ctrlKey === true
+
       if (!grab.engaged) {
         const zoom = canvas.getZoom() || 1
         const moved = Math.hypot(scene.x - grab.from.x, scene.y - grab.from.y)
@@ -493,7 +668,37 @@ export function PathLayer({ canvas, object, host }: PathLayerProps) {
       }
 
       if (!grab.side) {
-        write(target, moveNode(held, grab.ref, applyToPoint(liveRef.current.toObjectMat, scene)), null)
+        /*
+         * The picked anchors move as a body, by the pointer's delta from where
+         * the press landed. Shift holds that delta to an axis or a diagonal;
+         * then the GRABBED anchor is snapped to the path's other points, and
+         * the whole body follows it there — so the guide always speaks about
+         * the point under the pointer. ⌘ drags free of the snap.
+         */
+        const aimed = shift ? constrain(grab.from, scene) : scene
+        const lock = shift ? constrainLock(grab.from, aimed) : null
+        const { toObjectMat } = liveRef.current
+        let delta = applyToVector(toObjectMat, { x: aimed.x - grab.from.x, y: aimed.y - grab.from.y })
+        const candidate = { x: grab.was.x + delta.x, y: grab.was.y + delta.y }
+        let landed = candidate
+        if (!free) {
+          const zoom = canvas.getZoom() || 1
+          const local = applyToVector(toObjectMat, { x: SNAP_RADIUS / zoom, y: 0 })
+          const targets: Vec2[] = []
+          held.subpaths.forEach((subpath, s) =>
+            subpath.nodes.forEach((node, n) => {
+              if (!includesRef(grab.refs, { subpath: s, node: n })) targets.push(node.point)
+            }),
+          )
+          const snapped = snapPoint(candidate, targets, Math.hypot(local.x, local.y), lock)
+          landed = snapped.point
+          if (snapped.guides.length > 0) showGuides(snapped.guides, landed)
+          else hideGuides()
+        } else {
+          hideGuides()
+        }
+        delta = { x: landed.x - grab.was.x, y: landed.y - grab.was.y }
+        write(target, moveNodes(held, grab.refs, delta), null)
         return
       }
 
@@ -505,9 +710,17 @@ export function PathLayer({ canvas, object, host }: PathLayerProps) {
        * much on the first pixel of the drag. The delta keeps the grab where they
        * put it.
        */
+      /*
+       * Shift holds the handle to an axis or a diagonal FROM ITS ANCHOR — the
+       * constraint is about the tangent being set, not about where the press
+       * happened to land on the dot.
+       */
+      const anchorNode = held.subpaths[grab.ref.subpath]?.nodes[grab.ref.node]
+      const anchorScene = anchorNode ? applyToPoint(liveRef.current.toArtboardMat, anchorNode.point) : null
+      const aimed = shift && anchorScene ? constrain(anchorScene, scene) : scene
       const delta = applyToVector(liveRef.current.toObjectMat, {
-        x: scene.x - grab.from.x,
-        y: scene.y - grab.from.y,
+        x: aimed.x - grab.from.x,
+        y: aimed.y - grab.from.y,
       })
       write(
         target,
@@ -522,13 +735,47 @@ export function PathLayer({ canvas, object, host }: PathLayerProps) {
       )
     }
 
-    const onUp = (): void => {
+    const onUp = (opt: { e: Event }): void => {
+      const marquee = marqueeRef.current
+      if (marquee) {
+        marqueeRef.current = null
+        const { object: target } = liveRef.current
+        if (marquee.band) {
+          canvas.remove(marquee.band)
+          canvas.requestRenderAll()
+          const scene = canvas.getScenePoint(opt.e as MouseEvent)
+          const { toObjectMat } = liveRef.current
+          const inside = !target?.outline
+            ? []
+            : marquee.lasso
+              ? nodesInPolygon(target.outline, marquee.trail.map((p) => applyToPoint(toObjectMat, p)))
+              : nodesWithin(
+                  target.outline,
+                  applyToPoint(toObjectMat, marquee.from),
+                  applyToPoint(toObjectMat, scene),
+                )
+          setPicked(
+            marquee.add
+              ? [...pickedRef.current, ...inside.filter((ref) => !includesRef(pickedRef.current, ref))]
+              : inside,
+          )
+        } else if (!marquee.add) {
+          // A click on nothing puts the picked points down.
+          setPicked([])
+        }
+        return
+      }
+
       const grab = grabRef.current
       const { object: target } = liveRef.current
       useUiStore.getState().setInteracting(null)
       grabRef.current = null
+      hideGuides()
       const held = outlineRef.current
       outlineRef.current = null
+      if (grab && !grab.engaged && grab.dropOnClick) {
+        setPicked(pickedRef.current.filter((each) => !sameRef(each, grab.ref)))
+      }
       if (!grab?.engaged || !target || !held) return
 
       /*
@@ -537,7 +784,9 @@ export function PathLayer({ canvas, object, host }: PathLayerProps) {
        * where its handle sits, and undo should read truthfully.
        */
       const label = !grab.side
-        ? 'Move point'
+        ? grab.refs.length > 1
+          ? 'Move points'
+          : 'Move point'
         : grab.breaking
           ? 'Break point'
           : 'Bend curve'
@@ -593,6 +842,7 @@ export function PathLayer({ canvas, object, host }: PathLayerProps) {
       // took hold of something, and the gesture turned out to mean otherwise.
       outlineRef.current = null
       grabRef.current = null
+      marqueeRef.current = null
 
       const found = hit(scene)
       if (found) {
@@ -601,7 +851,7 @@ export function PathLayer({ canvas, object, host }: PathLayerProps) {
         if (found.side) return
         const kept = removeNode(target.outline, found.ref)
         if (kept) {
-          setRevealed(null)
+          setPicked([])
           write(target, kept, 'Remove point')
         }
         return
@@ -631,19 +881,72 @@ export function PathLayer({ canvas, object, host }: PathLayerProps) {
       const local = applyToVector(liveRef.current.toObjectMat, { x: reach, y: 0 })
       const result = insertNodeOn(target.outline, at, Math.hypot(local.x, local.y))
       if (!result) return
-      setRevealed(result.ref)
+      setPicked([result.ref])
       write(target, result.outline, 'Add point')
+    }
+
+    /**
+     * The keys the picked points answer, taken on the CAPTURE phase so the
+     * shortcut layer never sees them: its Delete deletes the whole object and
+     * its Escape leaves the mode, and both are right once nothing is picked.
+     */
+    const onKey = (e: KeyboardEvent): void => {
+      const { object: target, active: on } = liveRef.current
+      if (!on || !target?.outline || isTextEntry(e.target)) return
+      const refs = pickedRef.current
+      if (refs.length === 0) return
+      if (e.metaKey || e.ctrlKey) return
+
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        e.stopImmediatePropagation()
+        setPicked([])
+        return
+      }
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        e.preventDefault()
+        e.stopImmediatePropagation()
+        const kept = removeNodes(target.outline, refs)
+        setPicked([])
+        if (kept) write(target, kept, refs.length > 1 ? 'Remove points' : 'Remove point')
+        return
+      }
+      const step = e.shiftKey ? NUDGE_BIG : NUDGE
+      const nudge =
+        e.key === 'ArrowLeft'
+          ? { x: -step, y: 0 }
+          : e.key === 'ArrowRight'
+            ? { x: step, y: 0 }
+            : e.key === 'ArrowUp'
+              ? { x: 0, y: -step }
+              : e.key === 'ArrowDown'
+                ? { x: 0, y: step }
+                : null
+      if (!nudge) return
+      e.preventDefault()
+      e.stopImmediatePropagation()
+      // Artboard units, so a nudge is the same size on screen whatever the
+      // object's scale; one history entry per press, the way Figma undoes them.
+      const delta = applyToVector(liveRef.current.toObjectMat, nudge)
+      const current = currentOutline(target.id) ?? target.outline
+      write(target, moveNodes(current, refs, delta), refs.length > 1 ? 'Nudge points' : 'Nudge point')
     }
 
     canvas.on('mouse:down', onDown)
     canvas.on('mouse:move', onMove)
     canvas.on('mouse:up', onUp)
     canvas.on('mouse:dblclick', onDoubleClick)
+    window.addEventListener('keydown', onKey, { capture: true })
     return () => {
       canvas.off('mouse:down', onDown)
       canvas.off('mouse:move', onMove)
       canvas.off('mouse:up', onUp)
       canvas.off('mouse:dblclick', onDoubleClick)
+      window.removeEventListener('keydown', onKey, { capture: true })
+      hideGuides()
+      const band = marqueeRef.current?.band
+      if (band) canvas.remove(band)
+      marqueeRef.current = null
     }
   }, [canvas])
 

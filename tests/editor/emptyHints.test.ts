@@ -40,6 +40,36 @@ describe('the invitation', () => {
     store().setMosaicChars(mesh, 0, { [cell]: 'Q' })
     expect(invitationFor(stated(mesh))).toBeNull()
   })
+
+  it('is gone once anything at all is authored: a colour, a backdrop, a border, lines', () => {
+    const fresh = () => store().createMosaic({ columns: 2, rows: 1, artboardCenter: { x: 0, y: 0 } })
+    const tileOf = (id: string) => (stated(id) as { tiles: { id: string }[] }).tiles[0]!.id
+
+    const tinted = fresh()
+    store().setMosaicTileColour(tinted, 1, [tileOf(tinted)], '#ff0000')
+    expect(invitationFor(stated(tinted)), 'a tile colour in any state').toBeNull()
+
+    const inked = fresh()
+    store().setMosaicGlyphColour(inked, 0, [tileOf(inked)], '#0000ff')
+    expect(invitationFor(stated(inked)), 'a letter colour, letters or not').toBeNull()
+
+    const backed = fresh()
+    store().setMosaicBackground(backed, 0, '#eeeeee')
+    expect(invitationFor(stated(backed)), 'a backdrop').toBeNull()
+
+    const bordered = fresh()
+    store().setMosaicStroke(bordered, 0, { colour: '#000000', width: 2, dash: null, position: 'inside' })
+    expect(invitationFor(stated(bordered)), 'a border').toBeNull()
+
+    const cleared = fresh()
+    store().setMosaicTileColour(cleared, 0, [tileOf(cleared)], '#ff0000')
+    store().setMosaicTileColour(cleared, 0, [tileOf(cleared)], null)
+    expect(invitationFor(stated(cleared))?.icon, 'a colour cleared again is nothing authored').toBe('mosaic')
+
+    const lined = store().createMesh({ columns: 2, rows: 1, artboardCenter: { x: 0, y: 0 } })
+    store().setMeshLines(lined, 0, { colour: '#000000', width: 1, dash: null })
+    expect(invitationFor(stated(lined)), 'lines on a mesh').toBeNull()
+  })
 })
 
 /**

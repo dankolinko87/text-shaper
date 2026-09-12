@@ -1,5 +1,5 @@
 import type { IconName } from '../components/Icon'
-import type { Stated } from '../types/document'
+import type { Stated, Tiled } from '../types/document'
 import { token } from './colours'
 
 /**
@@ -12,6 +12,27 @@ export interface Invitation {
   hint: string
 }
 
+/**
+ * Whether NOTHING has been authored in a mosaic or mesh: no letters, but also
+ * no tile or letter colour, no backdrop, no border, no lines, in any state.
+ *
+ * Letters alone were the test, and a grid coloured tile by tile with no text
+ * in it — which is a thing people make — kept inviting them to type over
+ * their own work. What is authored is what the panel can author; the grid's
+ * shape and spacing are not counted, because a grid is always some shape.
+ */
+export function untouched(object: Tiled): boolean {
+  return object.states.every(
+    (state) =>
+      Object.keys(state.chars).length === 0 &&
+      Object.keys(state.glyphColour).length === 0 &&
+      Object.values(state.tileColour).every((colour) => colour === null) &&
+      (state.background ?? null) === null &&
+      (state.stroke ?? null) === null &&
+      !('lines' in state && state.lines),
+  )
+}
+
 /** Whether nothing has been put in yet, and what to say about it. */
 export function invitationFor(object: Stated): Invitation | null {
   switch (object.kind) {
@@ -20,13 +41,9 @@ export function invitationFor(object: Stated): Invitation | null {
         ? { icon: 'frame', hint: 'Drag objects in, or draw inside it' }
         : null
     case 'mosaic':
-      return object.states.every((state) => Object.keys(state.chars).length === 0)
-        ? { icon: 'mosaic', hint: 'Double-click a tile and type' }
-        : null
+      return untouched(object) ? { icon: 'mosaic', hint: 'Double-click a tile and type' } : null
     case 'mesh':
-      return object.states.every((state) => Object.keys(state.chars).length === 0)
-        ? { icon: 'mesh', hint: 'Double-click a cell and type' }
-        : null
+      return untouched(object) ? { icon: 'mesh', hint: 'Double-click a cell and type' } : null
   }
 }
 

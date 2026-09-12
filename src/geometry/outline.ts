@@ -335,6 +335,92 @@ export function moveNode(outline: PathOutline, ref: NodeRef, to: Vec2): PathOutl
   return withNode(outline, ref, (node) => ({ ...node, point: { ...to } }))
 }
 
+export const sameRef = (a: NodeRef, b: NodeRef): boolean =>
+  a.subpath === b.subpath && a.node === b.node
+
+/**
+ * Move several anchors by one offset — a picked set dragged or nudged as a
+ * body. Rigid: every handle rides with its own anchor and nothing turns, so
+ * the curve between two moved points travels unchanged and the curve between
+ * a moved point and a still one is the only thing that reshapes.
+ */
+export function moveNodes(outline: PathOutline, refs: readonly NodeRef[], delta: Vec2): PathOutline {
+  if (refs.length === 0 || (delta.x === 0 && delta.y === 0)) return outline
+  let next = outline
+  for (const ref of refs) {
+    const node = nodeAt(next, ref)
+    if (!node) continue
+    next = moveNode(next, ref, { x: node.point.x + delta.x, y: node.point.y + delta.y })
+  }
+  return next
+}
+
+/**
+ * Take several nodes away at once — Delete on a picked set.
+ *
+ * Highest index first within a contour, so removing one does not shift the
+ * others out from under their refs. Each removal is `removeNode`'s, floor and
+ * all: what cannot be spared stays, and null means nothing went.
+ */
+export function removeNodes(outline: PathOutline, refs: readonly NodeRef[]): PathOutline | null {
+  const order = [...refs].sort((a, b) => b.subpath - a.subpath || b.node - a.node)
+  let next: PathOutline = outline
+  let removed = 0
+  for (const ref of order) {
+    const kept = removeNode(next, ref)
+    if (!kept) continue
+    next = kept
+    removed++
+  }
+  return removed > 0 ? next : null
+}
+
+/**
+ * Whether a point is inside a polygon — the even-odd rule, which is what a
+ * lasso means: cross the loop an odd number of times on the way out and you
+ * were in it, however the loop was drawn.
+ */
+export function pointInPolygon(point: Vec2, polygon: readonly Vec2[]): boolean {
+  let inside = false
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const a = polygon[i]!
+    const b = polygon[j]!
+    const crosses = a.y > point.y !== b.y > point.y
+    if (!crosses) continue
+    const x = ((b.x - a.x) * (point.y - a.y)) / (b.y - a.y) + a.x
+    if (point.x < x) inside = !inside
+  }
+  return inside
+}
+
+/** Every anchor inside a lasso's loop. Fewer than three points is no loop. */
+export function nodesInPolygon(outline: PathOutline, polygon: readonly Vec2[]): NodeRef[] {
+  if (polygon.length < 3) return []
+  const out: NodeRef[] = []
+  outline.subpaths.forEach((subpath, s) => {
+    subpath.nodes.forEach((node, n) => {
+      if (pointInPolygon(node.point, polygon)) out.push({ subpath: s, node: n })
+    })
+  })
+  return out
+}
+
+/** Every anchor inside the box with corners `a` and `b`, edges included. */
+export function nodesWithin(outline: PathOutline, a: Vec2, b: Vec2): NodeRef[] {
+  const left = Math.min(a.x, b.x)
+  const right = Math.max(a.x, b.x)
+  const top = Math.min(a.y, b.y)
+  const bottom = Math.max(a.y, b.y)
+  const out: NodeRef[] = []
+  outline.subpaths.forEach((subpath, s) => {
+    subpath.nodes.forEach((node, n) => {
+      const p = node.point
+      if (p.x >= left && p.x <= right && p.y >= top && p.y <= bottom) out.push({ subpath: s, node: n })
+    })
+  })
+  return out
+}
+
 /**
  * Move one handle, in the space its anchor sits in.
  *

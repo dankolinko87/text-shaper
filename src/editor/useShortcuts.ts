@@ -4,10 +4,11 @@ import { memberAsFreed } from '../frame/frame'
 import { useDocumentStore } from '../state/documentStore'
 import { useProjectsStore } from '../state/projectsStore'
 import { useUiStore } from '../state/uiStore'
+import { nudgeSelection } from './objectDrag'
 import { openShapeEditingOnSelection } from './shapeEditing'
 
 /** True when the user is typing, so shortcuts must not steal the keystroke. */
-function isTextEntry(target: EventTarget | null): boolean {
+export function isTextEntry(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false
   const tag = target.tagName
   return (
@@ -340,6 +341,31 @@ export function useShortcuts(): void {
           else if (ui.spread) ui.setSpread(null)
           else doc.clearSelection()
           break
+
+        case 'ArrowLeft':
+        case 'ArrowRight':
+        case 'ArrowUp':
+        case 'ArrowDown': {
+          /*
+           * Arrows nudge the selection: one unit, ten with Shift. Not while a
+           * shape's points are being edited — there the picked points answer
+           * the arrows, on the capture phase, and with none picked the keys
+           * mean nothing rather than moving the shape out from under the
+           * editor.
+           */
+          if (ui.editingPoints) break
+          const step = e.shiftKey ? 10 : 1
+          const delta =
+            e.key === 'ArrowLeft'
+              ? { x: -step, y: 0 }
+              : e.key === 'ArrowRight'
+                ? { x: step, y: 0 }
+                : e.key === 'ArrowUp'
+                  ? { x: 0, y: -step }
+                  : { x: 0, y: step }
+          if (nudgeSelection(delta)) e.preventDefault()
+          break
+        }
 
         case '!':
           // Shift+1 — fit artboard. Handled here so it works canvas-wide.

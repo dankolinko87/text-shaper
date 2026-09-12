@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 
-import { beginObjectDrag } from '../../src/editor/objectDrag'
+import { beginObjectDrag, nudgeSelection } from '../../src/editor/objectDrag'
 import { useDocumentStore } from '../../src/state/documentStore'
 import { useUiStore } from '../../src/state/uiStore'
 
@@ -13,7 +13,7 @@ const store = () => useDocumentStore.getState()
 
 beforeEach(() => {
   store().resetDocument()
-  useUiStore.setState({ interacting: null })
+  useUiStore.setState({ interacting: null, insideFrame: null, frameSelection: [] })
 })
 
 const make = (): string => {
@@ -62,5 +62,47 @@ describe('dragging an object by a handle', () => {
     const id = make()
     store().setBase(id, { locked: true })
     expect(beginObjectDrag(id, { x: 0, y: 0 })).toBeNull()
+  })
+})
+
+describe('nudging the selection with the arrows', () => {
+  it('moves every selected object by the offset, one history entry per press', () => {
+    const a = make()
+    const b = make()
+    store().setSelection([a, b])
+    const past = store().past.length
+    expect(nudgeSelection({ x: 1, y: 0 })).toBe(true)
+    expect(at(a)).toEqual([101, 200])
+    expect(at(b)).toEqual([101, 200])
+    expect(nudgeSelection({ x: 0, y: 10 })).toBe(true)
+    expect(at(a)).toEqual([101, 210])
+    expect(store().past.length).toBe(past + 2)
+    expect(store().past[past]!.label).toBe('Nudge')
+  })
+
+  it('moves nothing that is locked, and says so when nothing moved', () => {
+    const id = make()
+    store().setBase(id, { locked: true })
+    store().setSelection([id])
+    const past = store().past.length
+    expect(nudgeSelection({ x: 5, y: 0 })).toBe(false)
+    expect(at(id)).toEqual([100, 200])
+    expect(store().past.length).toBe(past)
+    store().clearSelection()
+    expect(nudgeSelection({ x: 5, y: 0 })).toBe(false)
+  })
+
+  it('moves a member picked inside a frame, in the frame’s own space', () => {
+    const frame = store().createFrame({ box: { x: 0, y: 0, width: 400, height: 300 }, artboardCenter: { x: 0, y: 0 } })
+    const inner = make()
+    store().addToFrame(frame, [inner])
+    const member = (store().doc.objects[frame] as { members: { id: string; object: { transform: { x: number } } }[] }).members[0]!
+    const restingX = member.object.transform.x
+    useUiStore.setState({ insideFrame: frame, frameSelection: [member.id] })
+    expect(nudgeSelection({ x: 4, y: 0 })).toBe(true)
+    const state = (store().doc.objects[frame] as { states: { values: Record<string, { transform?: { x: number } }> }[] }).states[0]!
+    expect(state.values[member.id]?.transform?.x).toBe(restingX + 4)
+    // The frame itself stayed put.
+    expect(store().doc.objects[frame]!.transform.x).toBe(0)
   })
 })

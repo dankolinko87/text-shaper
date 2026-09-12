@@ -21,6 +21,7 @@ import {
   PEN_DRAG_THRESHOLD,
   type PenState,
 } from './penModel'
+import { SNAP_RADIUS, constrainLock, snapPoint, type SnapGuide } from './pointSnap'
 import { useDocumentStore } from '../state/documentStore'
 import { isTypography } from '../types/document'
 import { useUiStore } from '../state/uiStore'
@@ -44,6 +45,30 @@ const GUIDE_SPACING = 3
 const CLOSE_RADIUS = 8
 /** Smallest area a closed pen path needs before it counts as a shape to fill. */
 const MIN_SHAPE_AREA = 120
+/** How far a guide line runs past the points it joins, in screen pixels. */
+const GUIDE_OVERSHOOT = 24
+
+/**
+ * Where an aim lands: Shift squares it to the last anchor, then it snaps to
+ * line up with the run's other anchors unless ⌘ holds it free. The same rule
+ * for the press that places a node and for the rubber band before it, so the
+ * band shows exactly where the click will go.
+ */
+function aimAt(
+  state: PenState,
+  at: Vec2,
+  modifiers: { shift: boolean; free: boolean },
+  reach: number,
+): { point: Vec2; guides: SnapGuide[] } {
+  const last = state.nodes[state.nodes.length - 1]
+  const squared = modifiers.shift && last ? constrain(last.point, at) : at
+  if (modifiers.free) return { point: squared, guides: [] }
+  const lock = modifiers.shift && last ? constrainLock(last.point, squared) : null
+  // Every node but the one just placed: lining up with the segment's own start
+  // is what Shift is for, and the snap would fight it.
+  const targets = state.nodes.slice(0, -1).map((node) => node.point)
+  return snapPoint(squared, targets, reach, lock)
+}
 
 interface PenLayerProps {
   canvas: FabricCanvas | null
@@ -79,6 +104,8 @@ export function PenLayer({ canvas, armed }: PenLayerProps) {
   const pressRef = useRef<{ from: Vec2; engaged: boolean } | null>(null)
   /** Whether Shift is down, for the 45° constraint and the preview that shows it. */
   const shiftRef = useRef(false)
+  /** Whether ⌘ is down, which holds the aim free of snapping. */
+  const freeRef = useRef(false)
   /** Bumped to redraw; the run itself lives in a ref so handlers never re-register. */
   const [revision, setRevision] = useState(0)
 
@@ -145,8 +172,32 @@ export function PenLayer({ canvas, armed }: PenLayerProps) {
      */
     const last = state.nodes[state.nodes.length - 1]
     const hover = hoverRef.current
-    const aimed =
-      hover && shiftRef.current && last ? constrain(last.point, hover) : hover
+    const aim = hover
+      ? aimAt(state, hover, { shift: shiftRef.current, free: freeRef.current }, SNAP_RADIUS / zoom)
+      : null
+    const aimed = aim?.point ?? null
+    if (aim && last && !state.closed && !pressRef.current) {
+      // The lines the aim lines up with, so the snap is seen before the click.
+      for (const guide of aim.guides) {
+        const along = [aim.point, ...guide.through]
+        const other = guide.axis === 'x' ? 'y' : 'x'
+        const lows = along.map((p) => p[other])
+        const low = Math.min(...lows) - GUIDE_OVERSHOOT / zoom
+        const high = Math.max(...lows) + GUIDE_OVERSHOOT / zoom
+        const coords: [number, number, number, number] =
+          guide.axis === 'x' ? [guide.at, low, guide.at, high] : [low, guide.at, high, guide.at]
+        const line = new Line(coords, {
+          ...shared,
+          excludeFromExport: true,
+          stroke: PEN_COLOR,
+          strokeWidth: 1 / zoom,
+          strokeDashArray: [4 / zoom, 3 / zoom],
+          opacity: 0.9,
+        })
+        line.set('gridRole', 'snapGuide')
+        add(line)
+      }
+    }
     if (last && aimed && !state.closed && !pressRef.current) {
       const preview: PathOutline = {
         subpaths: [
@@ -323,6 +374,7 @@ export function PenLayer({ canvas, armed }: PenLayerProps) {
       const raw = { x: at.x, y: at.y }
       const reach = CLOSE_RADIUS / (canvas.getZoom() || 1)
       shiftRef.current = (opt.e as MouseEvent).shiftKey === true
+      freeRef.current = (opt.e as MouseEvent).metaKey === true || (opt.e as MouseEvent).ctrlKey === true
 
       let state = stateRef.current
       if (!state) {
@@ -356,7 +408,7 @@ export function PenLayer({ canvas, armed }: PenLayerProps) {
         return
       }
 
-      const scene = aim(state, raw)
+      const scene = aim(state, raw, canvas.getZoom() || 1)
       // The overlay reads the pointer from here, and a press is the most recent
       // thing the pointer did. Left to move events alone, the close ring could
       // still be lit around a node the pointer had long since clicked away from.
@@ -372,6 +424,7 @@ export function PenLayer({ canvas, armed }: PenLayerProps) {
       const scene = { x: at.x, y: at.y }
       hoverRef.current = scene
       shiftRef.current = (opt.e as MouseEvent).shiftKey === true
+      freeRef.current = (opt.e as MouseEvent).metaKey === true || (opt.e as MouseEvent).ctrlKey === true
 
       const press = pressRef.current
       const state = stateRef.current
@@ -437,11 +490,8 @@ export function PenLayer({ canvas, armed }: PenLayerProps) {
      * line being drawn rather than the screen. With nothing to measure from —
      * the first node of a run — Shift has no meaning and the pointer wins.
      */
-    const aim = (state: PenState, at: Vec2): Vec2 => {
-      if (!shiftRef.current) return at
-      const last = state.nodes[state.nodes.length - 1]
-      return last ? constrain(last.point, at) : at
-    }
+    const aim = (state: PenState, at: Vec2, zoom: number): Vec2 =>
+      aimAt(state, at, { shift: shiftRef.current, free: freeRef.current }, SNAP_RADIUS / zoom).point
 
     /** Pick up a selected open path at whichever end the pen was pressed on. */
     const continueSelected = (at: Vec2, reach: number): PenState | null => {
@@ -604,17 +654,24 @@ export function PenLayer({ canvas, armed }: PenLayerProps) {
         redraw()
         return
       }
-      // The preview shows the constraint, so it has to follow the key rather
-      // than wait for the pointer to move.
+      // The preview shows the constraint and the snap, so they have to follow
+      // the keys rather than wait for the pointer to move.
       if (e.key === 'Shift' && !shiftRef.current) {
         shiftRef.current = true
+        redraw()
+      }
+      if ((e.key === 'Meta' || e.key === 'Control') && !freeRef.current) {
+        freeRef.current = true
         redraw()
       }
     }
 
     const onKeyUp = (e: KeyboardEvent): void => {
-      if (e.key !== 'Shift' || !shiftRef.current) return
-      shiftRef.current = false
+      if (e.key === 'Shift' && shiftRef.current) {
+        shiftRef.current = false
+      } else if ((e.key === 'Meta' || e.key === 'Control') && freeRef.current) {
+        freeRef.current = false
+      } else return
       if (armedRef.current && stateRef.current) redraw()
     }
 

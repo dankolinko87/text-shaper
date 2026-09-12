@@ -1777,26 +1777,30 @@ export const useDocumentStore = create<DocumentState>()((set, get) => {
     },
 
     setMosaicBackground(id, stateIndex, colour) {
-      mutate((doc) => {
-        const object = doc.objects[id]
-        if (!object || !isTiled(object)) return doc
-        const at = object.states[stateIndex] ? stateIndex : 0
-        const state = object.states[at]
-        if (!state) return doc
+      // Through `editObject`, so a mosaic or mesh INSIDE a frame is reached
+      // too: looked up at the top level only, a member's backdrop was a
+      // silent no-op.
+      mutate((doc) =>
+        editObject(doc, id, (object) => {
+          if (!isTiled(object)) return object
+          const at = object.states[stateIndex] ? stateIndex : 0
+          const state = object.states[at]
+          if (!state) return object
 
-        // Landing back where it started is not a change, and must not leave an
-        // undo entry — the same rule the tile colours follow.
-        if ((state.background ?? null) === colour) return doc
+          // Landing back where it started is not a change, and must not leave an
+          // undo entry — the same rule the tile colours follow.
+          if ((state.background ?? null) === colour) return object
 
-        const states = tiledStates(object)
-        // Carried forward through the states that are still copies of this one,
-        // the same way geometry, spacing, font and the tile colours are.
-        for (const index of [at, ...followersOf(object, at)]) {
-          const each = states[index]
-          if (each) states[index] = { ...each, background: colour }
-        }
-        return { ...doc, objects: { ...doc.objects, [id]: withStates(object, states) } }
-      })
+          const states = tiledStates(object)
+          // Carried forward through the states that are still copies of this one,
+          // the same way geometry, spacing, font and the tile colours are.
+          for (const index of [at, ...followersOf(object, at)]) {
+            const each = states[index]
+            if (each) states[index] = { ...each, background: colour }
+          }
+          return withStates(object, states)
+        }),
+      )
     },
 
     setMosaicStroke(id, stateIndex, stroke) {
@@ -2269,13 +2273,16 @@ export const useDocumentStore = create<DocumentState>()((set, get) => {
     },
 
     setStatedBackground(id, background) {
-      mutate((doc) => {
-        const object = doc.objects[id]
-        if (!object || !isStated(object)) return doc
-        if (object.states.every((state) => (state.background ?? null) === background)) return doc
-        const states = object.states.map((state) => ({ ...state, background }))
-        return { ...doc, objects: { ...doc.objects, [id]: { ...object, states } as typeof object } }
-      })
+      // Through `editObject`, for the member inside a frame as much as the
+      // object on the artboard.
+      mutate((doc) =>
+        editObject(doc, id, (object) => {
+          if (!isStated(object)) return object
+          if (object.states.every((state) => (state.background ?? null) === background)) return object
+          const states = object.states.map((state) => ({ ...state, background }))
+          return { ...object, states } as typeof object
+        }),
+      )
     },
 
     setFrameStateBackground(id, index, background) {

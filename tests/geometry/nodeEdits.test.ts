@@ -6,8 +6,13 @@ import {
   isSmoothAt,
   moveHandle,
   moveNode,
+  moveNodes,
+  nodesInPolygon,
+  nodesWithin,
+  pointInPolygon,
   outlineToPath,
   removeNode,
+  removeNodes,
   toggleSmooth,
 } from '../../src/geometry/outline'
 import { resetPaperScope } from '../../src/geometry/paperContext'
@@ -412,5 +417,117 @@ describe('removing a node', () => {
   it('refuses a node that is not there', () => {
     expect(removeNode(line(), { subpath: 4, node: 0 })).toBeNull()
     expect(removeNode(line(), { subpath: 0, node: 99 })).toBeNull()
+  })
+})
+
+/**
+ * Several nodes at once: a picked set dragged, nudged or deleted as a body.
+ */
+describe('moving several nodes', () => {
+  it('carries each picked anchor and its handles by the same offset, and nothing else', () => {
+    const before = line()
+    const refs = [
+      { subpath: 0, node: 1 },
+      { subpath: 0, node: 2 },
+    ]
+    const after = moveNodes(before, refs, { x: 7, y: -3 })
+    before.subpaths[0]!.nodes.forEach((node, i) => {
+      const moved = after.subpaths[0]!.nodes[i]!
+      const picked = refs.some((ref) => ref.node === i)
+      expect(moved.point.x).toBeCloseTo(node.point.x + (picked ? 7 : 0), 9)
+      expect(moved.point.y).toBeCloseTo(node.point.y + (picked ? -3 : 0), 9)
+      expect(moved.handleIn).toEqual(node.handleIn)
+      expect(moved.handleOut).toEqual(node.handleOut)
+    })
+  })
+
+  it('is the outline itself for no refs or no offset', () => {
+    const before = line()
+    expect(moveNodes(before, [], { x: 1, y: 1 })).toBe(before)
+    expect(moveNodes(before, [{ subpath: 0, node: 0 }], { x: 0, y: 0 })).toBe(before)
+  })
+})
+
+describe('removing several nodes', () => {
+  it('takes them all away whatever order they were picked in', () => {
+    const before = line()
+    const count = before.subpaths[0]!.nodes.length
+    const kept = removeNodes(before, [
+      { subpath: 0, node: 1 },
+      { subpath: 0, node: count - 1 },
+      { subpath: 0, node: 3 },
+    ])!
+    expect(kept.subpaths[0]!.nodes).toHaveLength(count - 3)
+    // The survivors are the ones not named, in their old order.
+    const survivors = before.subpaths[0]!.nodes.filter((_, i) => ![1, 3, count - 1].includes(i))
+    expect(kept.subpaths[0]!.nodes.map((n) => n.point)).toEqual(survivors.map((n) => n.point))
+  })
+
+  it('stops at the floor and says so when nothing could go', () => {
+    const before = line()
+    const all = before.subpaths[0]!.nodes.map((_, i) => ({ subpath: 0, node: i }))
+    const kept = removeNodes(before, all)!
+    expect(kept.subpaths[0]!.nodes).toHaveLength(2)
+    expect(removeNodes(kept, [{ subpath: 0, node: 0 }])).toBeNull()
+    expect(removeNodes(before, [])).toBeNull()
+  })
+})
+
+describe('the nodes inside a box', () => {
+  it('names every anchor inside, corners in any order, edges included', () => {
+    const outline: PathOutline = {
+      subpaths: [
+        {
+          closed: false,
+          nodes: [10, 20, 30, 40].map((x) => ({
+            point: { x, y: x },
+            handleIn: { x: 0, y: 0 },
+            handleOut: { x: 0, y: 0 },
+            smooth: false,
+          })),
+        },
+      ],
+    }
+    expect(nodesWithin(outline, { x: 35, y: 35 }, { x: 20, y: 20 })).toEqual([
+      { subpath: 0, node: 1 },
+      { subpath: 0, node: 2 },
+    ])
+    expect(nodesWithin(outline, { x: 0, y: 0 }, { x: 5, y: 5 })).toEqual([])
+  })
+})
+
+describe('the nodes inside a lasso', () => {
+  const loop = [
+    { x: 0, y: 0 },
+    { x: 40, y: 0 },
+    { x: 40, y: 20 },
+    { x: 20, y: 20 },
+    { x: 20, y: 40 },
+    { x: 0, y: 40 },
+  ]
+  it('is inside an L-shaped loop where the loop actually is', () => {
+    expect(pointInPolygon({ x: 10, y: 10 }, loop)).toBe(true)
+    expect(pointInPolygon({ x: 10, y: 30 }, loop)).toBe(true)
+    expect(pointInPolygon({ x: 30, y: 30 }, loop), 'the notch is outside').toBe(false)
+    expect(pointInPolygon({ x: 50, y: 10 }, loop)).toBe(false)
+  })
+  it('names the anchors the loop takes in, and none for a loop too short to close', () => {
+    const outline: PathOutline = {
+      subpaths: [
+        {
+          closed: false,
+          nodes: [
+            { x: 10, y: 10 },
+            { x: 30, y: 30 },
+            { x: 10, y: 30 },
+          ].map((point) => ({ point, handleIn: { x: 0, y: 0 }, handleOut: { x: 0, y: 0 }, smooth: false })),
+        },
+      ],
+    }
+    expect(nodesInPolygon(outline, loop)).toEqual([
+      { subpath: 0, node: 0 },
+      { subpath: 0, node: 2 },
+    ])
+    expect(nodesInPolygon(outline, loop.slice(0, 2))).toEqual([])
   })
 })
