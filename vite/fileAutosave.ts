@@ -56,9 +56,11 @@ export function fileAutosave(): Plugin {
           req.on('end', () => {
             const raw = Buffer.concat(chunks).toString('utf8')
             try {
-              // Only a document: anything that is not JSON with objects in it is refused.
-              const parsed = JSON.parse(raw) as { objects?: unknown }
-              if (!parsed || typeof parsed !== 'object' || typeof parsed.objects !== 'object') {
+              // A document, or a workspace of them: anything else is refused.
+              const parsed = JSON.parse(raw) as { objects?: unknown; workspace?: unknown }
+              const document = typeof parsed?.objects === 'object' && parsed.objects !== null
+              const workspace = typeof parsed?.workspace === 'object' && parsed.workspace !== null
+              if (!parsed || typeof parsed !== 'object' || (!document && !workspace)) {
                 res.statusCode = 400
                 res.end()
                 return

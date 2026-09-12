@@ -39,6 +39,7 @@ import type {
 import { isStated, opacityOf } from '../types/document'
 import { buildMeshGroup, meshContentKey } from './meshRender'
 import { selectionColour } from './colours'
+import { emptyGround, groundFor, groundRadius } from './invitations'
 import { memberAtState, valuesFor } from '../frame/frame'
 import { mosaicClip, strokeChild, strokeRect } from './strokePaint'
 import { dashArrayFor, strokePaint } from '../geometry/stroke'
@@ -622,6 +623,15 @@ export interface SyncInput {
    * re-order the row under the hand doing it.
    */
   spread?: string | null
+  /**
+   * The object the plate stands under — the frame being worked inside, else
+   * the selected object with states — if any.
+   *
+   * A view again. It changes one thing about how an EMPTY object is drawn:
+   * its light ground is left out, because the plate is that ground while it
+   * is there (`groundFor`).
+   */
+  held?: string | null
   rendered: Map<string, RenderedObject>
 }
 
@@ -782,7 +792,11 @@ function mosaicContentKey(object: LetterMosaicObject, at: number): string {
  * Children are built in the mosaic's own local coordinates, so `positionGroup`
  * and `localCentre` place the group exactly as they do for a shape.
  */
-function buildMosaicGroup(object: LetterMosaicObject, at: number): Group {
+function buildMosaicGroup(
+  object: LetterMosaicObject,
+  at: number,
+  ground: string | null = emptyGround(object),
+): Group {
   const state = object.states[at] ?? object.states[0]
   const references = glyphReferenceRects(object)
   const tiles = layoutMosaic(object.tiles, state?.x ?? {}, state?.y ?? {}, object.localBounds, {
@@ -948,6 +962,10 @@ function buildMosaicGroup(object: LetterMosaicObject, at: number): Group {
    * colour here to fade, and inventing one would be a value nobody authored.
    */
   const backdrop = state?.background ?? null
+  // An empty mosaic stands on a light, rounded ground, so it can be seen at
+  // all; see `emptyGround`. The rounding is the ground's, not the mosaic's:
+  // the outer radius is authored, and nothing has been authored yet.
+  const rounding = ground ? groundRadius(object.localBounds.width, object.localBounds.height) : 0
   const extent = new FabricRect({
     left: object.localBounds.x + object.localBounds.width / 2,
     top: object.localBounds.y + object.localBounds.height / 2,
@@ -955,11 +973,14 @@ function buildMosaicGroup(object: LetterMosaicObject, at: number): Group {
     height: object.localBounds.height,
     originX: 'center',
     originY: 'center',
-    fill: backdrop ?? 'transparent',
+    fill: backdrop ?? ground ?? 'transparent',
+    rx: rounding,
+    ry: rounding,
     strokeWidth: 0,
     objectCaching: false,
   })
   extent.set('role', 'extent')
+  extent.set('restFill', ground ?? 'transparent')
   children.unshift(extent)
 
   /*
@@ -1119,7 +1140,7 @@ export function paintMemberArtwork(
 export function paintFrameBackground(group: Group, colour: string | null): void {
   for (const part of group.getObjects()) {
     if (part.get('role') !== 'plate') continue
-    const next = colour ?? 'transparent'
+    const next = colour ?? (part.get('restFill') as string | undefined) ?? 'transparent'
     if (part.fill === next) return
     part.set({ fill: next })
     part.set('dirty', true)
@@ -1411,20 +1432,24 @@ export function windowOffset(object: Stated, index: number): number {
  * because the fits arrive with the text paths rather than with the builder.
  */
 function buildWindow(object: Stated, at: number, input: SyncInput): Group {
+  const ground = groundFor(object, input.held)
   return object.kind === 'mosaic'
-    ? buildMosaicGroup(object, at)
+    ? buildMosaicGroup(object, at, ground)
     : object.kind === 'mesh'
-      ? buildMeshGroup(object, at)
-      : buildFrameGroup(object, at, input)
+      ? buildMeshGroup(object, at, ground)
+      : buildFrameGroup(object, at, input, ground)
 }
 
 /** What a window of a stated object at state `at` is drawn from, as one string. */
 function statedContentKey(object: Stated, at: number, input: SyncInput): string {
-  return object.kind === 'mosaic'
-    ? mosaicContentKey(object, at)
-    : object.kind === 'mesh'
-      ? meshContentKey(object, at)
-      : frameContentKey(object, at, input)
+  const own =
+    object.kind === 'mosaic'
+      ? mosaicContentKey(object, at)
+      : object.kind === 'mesh'
+        ? meshContentKey(object, at)
+        : frameContentKey(object, at, input)
+  // The ground is drawn or it is not, and only the plate's arrival changes which.
+  return `${own}~ground:${groundFor(object, input.held) ?? ''}`
 }
 
 /**
@@ -1526,7 +1551,12 @@ class FrameGroup extends Group {
   }
 }
 
-function buildFrameGroup(object: FrameObject, at: number, input: SyncInput): Group {
+function buildFrameGroup(
+  object: FrameObject,
+  at: number,
+  input: SyncInput,
+  ground: string | null = emptyGround(object),
+): Group {
   /** Whether the frame is being worked INSIDE, which is what makes it interactive. */
   const inside = input.insideFrame === object.id
   /** Each member and where it belongs, applied once the group exists. */
@@ -1540,10 +1570,13 @@ function buildFrameGroup(object: FrameObject, at: number, input: SyncInput): Gro
   /*
    * The bounds themselves, drawn first and always.
    *
-   * A frame with nothing in it has to be visible and selectable, or drawing one
-   * would produce nothing and there would be nowhere to drop anything. It is
-   * also what the clip is measured against, so it is never absent.
+   * What the clip is measured against and what carries the state's backdrop,
+   * so it is never absent — but it draws no edge of its own: a frame on the
+   * page behaves as any other object, marked when selected and plain when
+   * not. An EMPTY frame is made visible by `EmptyHints` and the rounded
+   * ground it stands on, not by a line.
    */
+  const rounding = ground ? groundRadius(object.localBounds.width, object.localBounds.height) : 0
   const plate = new FabricRect({
     left: object.localBounds.x + object.localBounds.width / 2,
     top: object.localBounds.y + object.localBounds.height / 2,
@@ -1557,15 +1590,15 @@ function buildFrameGroup(object: FrameObject, at: number, input: SyncInput): Gro
      * plate — the rectangle that was already there to make an empty frame
      * visible and to measure the clip against.
      */
-    fill: state?.background ?? 'transparent',
-    stroke: SHAPE_PLACEHOLDER_STROKE,
-    strokeWidth: 1,
-    strokeUniform: true,
-    strokeDashArray: [4, 4],
+    fill: state?.background ?? ground ?? 'transparent',
+    rx: rounding,
+    ry: rounding,
+    strokeWidth: 0,
     objectCaching: false,
     evented: false,
   })
   plate.set('role', 'plate')
+  plate.set('restFill', ground ?? 'transparent')
   children.push(plate)
 
   for (const member of object.members) {

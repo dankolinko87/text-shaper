@@ -17,10 +17,6 @@
   gap: var(--space-4);
   flex: 1;
 }
-.topbar__section--center {
-  flex: 0;
-  justify-content: center;
-}
 .topbar__section--end {
   justify-content: flex-end;
 }
@@ -36,24 +32,22 @@
  * `flex-shrink: 0` because the row beside it holds a text field that will
  * happily squeeze its neighbours; a squashed logo is worse than a narrow field.
  */
+/*
+ * The mark stands on its own, not on a plate: no padding, no hover ground,
+ * nothing that reads as a button — the tooltip says what a press does.
+ */
 .topbar__logo {
   display: flex;
   align-items: center;
   flex-shrink: 0;
-  margin-right: var(--space-3);
-  padding: var(--space-2) var(--space-3);
+  padding: 0;
   border: 0;
-  border-radius: var(--radius-md);
   background: transparent;
   color: var(--text-primary);
   cursor: pointer;
-  transition: background var(--duration-fast) var(--ease);
-}
-.topbar__logo:hover {
-  background: var(--surface-3);
 }
 .topbar__logo:active {
-  background: var(--surface-2);
+  opacity: 0.85;
 }
 
 .topbar__name {

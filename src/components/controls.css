@@ -467,8 +467,12 @@ input[type='range'].color-picker__alpha::-moz-range-thumb {
   position: relative;
   display: inline-flex;
 }
+/*
+ * On the document, not in the control: placed at screen coordinates by
+ * `Tooltip`, so neither a window edge nor a panel's overflow can cut it.
+ */
 .tooltip {
-  position: absolute;
+  position: fixed;
   z-index: var(--z-tooltip);
   padding: var(--space-2) var(--space-4);
   border: 1px solid var(--border-default);
@@ -486,21 +490,6 @@ input[type='range'].color-picker__alpha::-moz-range-thumb {
   from {
     opacity: 0;
   }
-}
-.tooltip[data-side='right'] {
-  left: calc(100% + 8px);
-  top: 50%;
-  transform: translateY(-50%);
-}
-.tooltip[data-side='bottom'] {
-  top: calc(100% + 8px);
-  left: 50%;
-  transform: translateX(-50%);
-}
-.tooltip[data-side='top'] {
-  bottom: calc(100% + 8px);
-  left: 50%;
-  transform: translateX(-50%);
 }
 .tooltip kbd {
   margin-left: var(--space-3);

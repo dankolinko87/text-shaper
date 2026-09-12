@@ -17,6 +17,7 @@ import {
   shiftCommands,
   type GlyphMark,
 } from './meshPlayback'
+import { emptyGround, groundRadius } from './invitations'
 import { finishGroup, fontKey } from './renderer'
 import { strokeChild } from './strokePaint'
 
@@ -73,7 +74,11 @@ function widestReach(object: MeshObject): number {
   return reach
 }
 
-export function buildMeshGroup(object: MeshObject, at: number): Group {
+export function buildMeshGroup(
+  object: MeshObject,
+  at: number,
+  ground: string | null = emptyGround(object),
+): Group {
   const state = object.states[at] ?? object.states[0]
   const positions = state?.nodes ?? {}
   const spacing = {
@@ -112,19 +117,31 @@ export function buildMeshGroup(object: MeshObject, at: number): Group {
   extent.set('role', 'extent')
   children.push(extent)
 
-  // The backdrop: the silhouette grown by the padding, as one fill.
+  // The backdrop: the silhouette grown by the padding, as one fill. An empty
+  // mesh stands on a light, rounded ground (`emptyGround`); the rounding is
+  // the ground's and is kept through playback (`restRadius`) the way the
+  // colour is.
+  const restRadius = ground ? groundRadius(bounds.width, bounds.height) : 0
   const backdrop = new Path(
     asPath(
-      backdropCommands(object.backdrop, object.tiles, positions, corners.outerRadius, spacing.outerPadding),
+      backdropCommands(
+        object.backdrop,
+        object.tiles,
+        positions,
+        Math.max(corners.outerRadius, restRadius),
+        spacing.outerPadding,
+      ),
     ),
     {
-      fill: state?.background ?? 'transparent',
+      fill: state?.background ?? ground ?? 'transparent',
       strokeWidth: 0,
       objectCaching: false,
       evented: false,
     },
   )
   backdrop.fillRule = 'evenodd'
+  backdrop.set('restFill', ground ?? 'transparent')
+  backdrop.set('restRadius', restRadius)
   backdrop.set('role', 'backdrop')
   children.push(backdrop)
 

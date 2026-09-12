@@ -3,6 +3,7 @@ import type { Canvas as FabricCanvas } from 'fabric'
 
 import { pointObjectToArtboard } from '../geometry/objectSpace'
 import { token } from './colours'
+import { isExporting } from './liveCanvas'
 import { liveTransform } from './renderer'
 import type { DocumentObject, Rect } from '../types/document'
 
@@ -96,6 +97,8 @@ export function useCanvasAnchor(
     }
 
     const place = (): void => {
+      // A snapshot's render is not the screen's; see `isExporting`.
+      if (isExporting()) return
       const stage = canvas.getElement().closest('.canvas-stage')
       if (!stage) return
       const box =

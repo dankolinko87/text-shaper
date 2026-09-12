@@ -1,12 +1,7 @@
 import { useDocumentStore } from './documentStore'
 import { putFileAutosave, restoreFileAutosave } from './fileAutosave'
-import {
-  keepAutosaveAsPrevious,
-  loadAutosave,
-  loadPreviousAutosave,
-  saveAutosave,
-  serializeDocument,
-} from './persistence'
+import { workspaceEnvelope } from './projects'
+import { keepBeforeFirstWrite, useProjectsStore } from './projectsStore'
 
 /**
  * Keeping work across a page reload.
@@ -57,37 +52,21 @@ const QUIET_MS = 400
  * Everything about the session that follows has to avoid destroying it.
  */
 export type RestoreResult =
-  | { kind: 'restored'; from: 'current' | 'previous' }
+  | { kind: 'restored'; from: 'current' | 'previous' | 'legacy' }
   | { kind: 'nothing' }
   | { kind: 'failed'; error: string }
 
+/**
+ * Bring back what was there: the workspace of projects, or the single
+ * autosave older builds wrote (which becomes project 1), or nothing.
+ *
+ * Nothing on the canvas yet is the only safe moment to replace the document
+ * wholesale: doing it later would throw away whatever is already there.
+ */
 export function restoreAutosave(): RestoreResult {
-  /*
-   * Nothing on the canvas yet is the only safe moment to replace the document
-   * wholesale: doing it later would throw away whatever is already there.
-   */
   if (useDocumentStore.getState().doc.objectOrder.length > 0) return { kind: 'nothing' }
-
-  const current = loadAutosave()
-  if (current.ok && current.doc) {
-    useDocumentStore.getState().loadDocument(current.doc)
-    return { kind: 'restored', from: 'current' }
-  }
-
-  /*
-   * The current snapshot is unreadable, so fall back to what the last session
-   * started with. This is the whole point of keeping two: a build that cannot
-   * read the newest file can very often read the one before it.
-   */
-  const previous = loadPreviousAutosave()
-  if (previous.ok && previous.doc) {
-    useDocumentStore.getState().loadDocument(previous.doc)
-    return { kind: 'restored', from: 'previous' }
-  }
-
-  // Told apart deliberately. "Nothing saved" is an ordinary first run; a snapshot
-  // that exists and will not load is work at risk, and the caller must know.
-  if (current.error === 'Nothing autosaved.') {
+  const restored = useProjectsStore.getState().restoreWorkspace()
+  if (restored.kind === 'nothing') {
     /*
      * Nothing in THIS browser's storage — which is not the same as nothing
      * saved. The preview pane in the desktop app opens a fresh profile every
@@ -95,9 +74,8 @@ export function restoreAutosave(): RestoreResult {
      * loads only into a session that is still empty when it answers.
      */
     void restoreFileAutosave()
-    return { kind: 'nothing' }
   }
-  return { kind: 'failed', error: current.error ?? 'The autosave could not be read.' }
+  return restored
 }
 
 /**
@@ -113,7 +91,6 @@ export function restoreAutosave(): RestoreResult {
  */
 export function startAutosave(restored: RestoreResult): () => void {
   let timer: ReturnType<typeof setTimeout> | undefined
-  let keptPrevious = false
 
   /*
    * A snapshot this build could not read is the only copy of that work. Writing
@@ -141,20 +118,20 @@ export function startAutosave(restored: RestoreResult): () => void {
      */
     if (state.doc.objectOrder.length === 0 && state.past.length === 0) return
 
-    // Once per session, before anything of ours can land on it, so there is
-    // always a copy of what this session inherited.
-    if (!keptPrevious) {
-      keptPrevious = true
-      keepAutosaveAsPrevious()
-    }
+    const projects = useProjectsStore.getState()
+    if (!projects.currentId) return
+    // Once per session per project, before anything of ours can land on it,
+    // so there is always a copy of what this session inherited.
+    keepBeforeFirstWrite(projects.currentId)
 
-    if (!saveAutosave(state.doc)) {
+    if (!projects.saveCurrent({ thumbnail: projects.snapshot() })) {
       // Almost always the storage quota. Silence here is how a net that stopped
       // working goes unnoticed until it is needed.
       console.warn('[autosave] could not write the document to local storage.')
     }
     // And the copy that outlives this browser profile, while there is a server to keep it.
-    putFileAutosave(serializeDocument(state.doc))
+    const envelope = workspaceEnvelope()
+    if (envelope) putFileAutosave(JSON.stringify(envelope))
   }
 
   const schedule = (): void => {

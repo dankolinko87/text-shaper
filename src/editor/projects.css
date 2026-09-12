@@ -1,0 +1,169 @@
+/*
+ * The projects drawer: a sidebar that pushes the stage, and the cards in it.
+ *
+ * The two panels float over the artwork because they are tools beside the
+ * work; this one takes room because it is where the work is chosen — a
+ * flat, edge-to-edge column with a rule down its side, not a card. Its width
+ * is the animation, like the states rail's, and the column inside is a fixed
+ * width so the drawer clips it rather than squashing it.
+ */
+.app__drawer {
+  flex: none;
+  display: flex;
+  width: 0;
+  overflow: hidden;
+  background: var(--surface-1);
+  transition: width var(--duration-slow) var(--ease);
+}
+.app__drawer[data-open='true'] {
+  width: var(--drawer-width);
+  border-right: 1px solid var(--border-subtle);
+}
+
+/*
+ * Not a card: no edge, no corners, no shadow — the drawer's own rule is its
+ * only line. Named under the drawer, so it outranks `.panel` whichever
+ * stylesheet the dev server happens to inject last.
+ */
+.app__drawer .panel--projects {
+  flex: none;
+  width: var(--drawer-width);
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+}
+.app__drawer .panel__header {
+  height: 44px;
+  padding: 0 var(--space-6);
+  border-bottom: 0;
+}
+
+.projects__header-actions {
+  display: flex;
+  gap: 1px;
+  margin-left: auto;
+}
+
+.projects__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-2) var(--space-6) var(--space-6);
+}
+
+/* A card: a picture, a name, the dates, and the ⋯ — larger than a row, smaller than a page. */
+.project {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  cursor: pointer;
+  transition:
+    background var(--duration-fast) var(--ease),
+    border-color var(--duration-fast) var(--ease);
+}
+.project:hover {
+  background: var(--surface-3);
+  border-color: var(--border-default);
+}
+.project[data-current='true'] {
+  background: var(--selection-wash);
+  border-color: var(--selection-border);
+  cursor: default;
+}
+
+/* The picture, fitted whole into a fixed box, with a margin so nothing touches the edge. */
+.project__thumb {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  aspect-ratio: 16 / 10;
+  padding: var(--space-4);
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  background: var(--surface-0);
+}
+.project__thumb img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+.project__empty {
+  color: var(--text-tertiary);
+}
+
+.project__meta {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+  padding-right: 28px;
+}
+.project__name {
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: var(--text-md);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.project__name-input {
+  width: 100%;
+}
+.project__dates {
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+
+/* The ⋯, in the item's corner; shown on hover and always on the current item. */
+.project__actions {
+  position: absolute;
+  right: var(--space-4);
+  bottom: var(--space-4);
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease);
+}
+.project:hover .project__actions,
+.project[data-current='true'] .project__actions,
+.project__actions:focus-within {
+  opacity: 1;
+}
+
+
+/*
+ * The way in, left of the mark: a chevron the size of the header's other
+ * icons, pointing at the drawer's edge. No plate and no number — the count
+ * is on the drawer itself, and the tooltip says it. Sized like an icon
+ * button, with air on its right so the mark is not crowded.
+ */
+.topbar__projects {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin-right: var(--space-2);
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition:
+    background var(--duration-fast) var(--ease),
+    color var(--duration-fast) var(--ease);
+}
+.topbar__projects:hover {
+  background: var(--surface-3);
+  color: var(--text-primary);
+}
+.topbar__projects[aria-expanded='true'] {
+  color: var(--text-primary);
+}

@@ -357,20 +357,21 @@ const PLATE_PAD = 0.06
 const CHIP_ROOM = 28
 
 /**
- * The plate behind a held object with states, in the object's own units: the
- * object (or its whole spread row) with padding round it. Defined once,
- * because the plate is drawn from it AND the bar hangs from it — a bar that
- * hung from the object's edge sat on the plate's bottom strip.
+ * The plate behind a held object with states, in the object's own units.
+ * Defined once, because the plate is drawn from it AND the bar hangs from it
+ * — a bar that hung from the object's edge sat on the plate's bottom strip.
  *
- * Spread, the chips ride above each window at screen size, so the top edge
- * makes room for them at whatever the zoom is; collapsed there are no chips
- * and the padding is even.
+ * Spread, the plate takes the whole row in with padding round it, and its
+ * top edge makes screen-sized room for the number chips at whatever the zoom
+ * is — the padding is where the plate can be taken hold of. Collapsed there
+ * are no chips and nothing to hold but the object, so the plate is exactly
+ * the object's box: a ground under it, not a margin round it.
  */
 export function plateBounds(object: Stated, spread: boolean, zoom: number): Rect {
   const box = spread ? spreadBounds(object) : object.localBounds
-  const pad = object.localBounds.width * PLATE_PAD
+  const pad = spread ? object.localBounds.width * PLATE_PAD : 0
   const scaleY = object.transform.scaleY || 1
-  const padTop = spread ? Math.max(pad, CHIP_ROOM / ((zoom || 1) * scaleY)) : pad
+  const padTop = spread ? Math.max(pad, CHIP_ROOM / ((zoom || 1) * scaleY)) : 0
   return {
     x: box.x - pad,
     y: box.y - padTop,

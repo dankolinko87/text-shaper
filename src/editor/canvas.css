@@ -167,6 +167,37 @@
   line-height: 1;
   white-space: nowrap;
   text-overflow: ellipsis;
+  /* A handle, not a caption: it takes the press and drags the object. */
+  cursor: move;
+  user-select: none;
+  user-select: none;
+}
+
+/*
+ * The invitation in an empty frame, mosaic or mesh — `EmptyHints`. Centred
+ * on the object, quiet, and never in the way of a press: the object under it
+ * is what takes the pointer.
+ */
+.frame-empty {
+  position: absolute;
+  z-index: var(--z-canvas-bar);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  /*
+   * Its natural width, capped by the object's box (set inline). Absolutely
+   * placed, it would otherwise be sized to whatever room lies to the right of
+   * its own left edge, and wrap the sentence word by word.
+   */
+  width: max-content;
+  translate: -50% -50%;
+  /* Secondary, not tertiary: it sits on the grey ground, a step darker than the page. */
+  color: var(--text-secondary);
+  text-align: center;
   pointer-events: none;
   user-select: none;
+}
+.frame-empty__hint {
+  font-size: var(--text-sm);
 }

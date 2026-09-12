@@ -250,12 +250,12 @@ export function paintMeshFrame(
           frame.backdrop,
           tiles,
           frame.nodes,
-          frame.corners.outerRadius,
+          Math.max(frame.corners.outerRadius, (child.get('restRadius') as number | undefined) ?? 0),
           frame.spacing.outerPadding ?? 0,
         ),
         centre,
       )
-      child.set({ fill: frame.background ?? 'transparent' })
+      child.set({ fill: frame.background ?? (child.get('restFill') as string | undefined) ?? 'transparent' })
       continue
     }
     if (role === 'lines') {

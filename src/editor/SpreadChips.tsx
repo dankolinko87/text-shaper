@@ -6,6 +6,7 @@ import { Icon } from '../components/Icon'
 import { useUiStore } from '../state/uiStore'
 import type { Stated } from '../types/document'
 import { placeOnStage } from './canvasAnchor'
+import { isExporting } from './liveCanvas'
 import { windowOffset } from './renderer'
 import { duplicateStateAt, kindOf, showState } from './stated'
 import './canvas.css'
@@ -56,6 +57,8 @@ export function SpreadChips({
       return
     }
     const place = (): void => {
+      // A snapshot's render is not the screen's; see `isExporting`.
+      if (isExporting()) return
       const box = object.localBounds
       const scale = object.transform.scaleX || 1
       // One window's step and the gap between two, in the object's own units.

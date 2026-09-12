@@ -236,9 +236,10 @@ describe.each([
       expect(row.width).toBeCloseTo(o.localBounds.width + windowOffset(o, 2) / 2, 6)
       const one = plateBounds(o, false, 1)
       const all = plateBounds(o, true, 1)
+      expect(one, 'collapsed, the plate is the box').toEqual(o.localBounds)
       expect(all.width).toBeGreaterThan(one.width)
-      expect(all.x).toBeCloseTo(one.x, 9)
-      expect(all.y, 'room for the chips').toBeLessThanOrEqual(one.y)
+      expect(all.x, 'spread, it is padded').toBeLessThan(one.x)
+      expect(all.y, 'room for the chips').toBeLessThan(one.y)
     })
 
     it('finds the window under a point, and no window in a gap or off the row', () => {

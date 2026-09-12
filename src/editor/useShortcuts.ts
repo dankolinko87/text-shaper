@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 
 import { memberAsFreed } from '../frame/frame'
 import { useDocumentStore } from '../state/documentStore'
+import { useProjectsStore } from '../state/projectsStore'
 import { useUiStore } from '../state/uiStore'
 import { openShapeEditingOnSelection } from './shapeEditing'
 
@@ -58,6 +59,14 @@ export function useShortcuts(): void {
       const mod = e.metaKey || e.ctrlKey
       const doc = useDocumentStore.getState()
       const ui = useUiStore.getState()
+
+      // A new project, and the drawer out so it can be seen among the others.
+      if (mod && e.shiftKey && e.key.toLowerCase() === 'n') {
+        e.preventDefault()
+        useProjectsStore.getState().newProject()
+        ui.setProjectsOpen(true)
+        return
+      }
 
       // Undo / redo
       if (mod && e.key.toLowerCase() === 'z') {

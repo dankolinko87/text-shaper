@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 
 import { alphaOf, withAlpha } from '../typography/colour'
 import { ColorPicker } from './ColorPicker'
 import { useDismiss } from './useDismiss'
 import type { PositionedStroke, Stroke, StrokePosition } from '../types/document'
 import { Icon, type IconName } from './Icon'
+import { placeTip, type Placement, type TipSide } from './tooltipPlacement'
 import './controls.css'
 
 /* --------------------------------------------------------------- Tooltip */
@@ -12,7 +14,7 @@ import './controls.css'
 interface TooltipProps {
   label: string
   shortcut?: string
-  side?: 'top' | 'right' | 'bottom'
+  side?: TipSide
   children: ReactNode
 }
 
@@ -38,6 +40,27 @@ export function Tooltip({ label, shortcut, side = 'bottom', children }: TooltipP
   const [visible, setVisible] = useState(false)
   const timer = useRef<number | null>(null)
   const shown = useRef(false)
+  const wrapRef = useRef<HTMLSpanElement>(null)
+  const tipRef = useRef<HTMLSpanElement>(null)
+  const [placement, setPlacement] = useState<Placement | null>(null)
+
+  /*
+   * Placed once it exists: the tip is measured, then put beside its control
+   * on the screen — flipped or slid so no edge cuts it. It is rendered at the
+   * top of the document, so no panel's overflow can clip it either.
+   */
+  useLayoutEffect(() => {
+    if (!visible) {
+      setPlacement(null)
+      return
+    }
+    const anchor = wrapRef.current?.getBoundingClientRect()
+    const tip = tipRef.current?.getBoundingClientRect()
+    if (!anchor || !tip) return
+    setPlacement(
+      placeTip(anchor, tip, side, { width: window.innerWidth, height: window.innerHeight }),
+    )
+  }, [visible, side, label, shortcut])
 
   const cancel = (): void => {
     if (timer.current === null) return
@@ -67,6 +90,7 @@ export function Tooltip({ label, shortcut, side = 'bottom', children }: TooltipP
 
   return (
     <span
+      ref={wrapRef}
       className="tooltip-wrap"
       onMouseEnter={enter}
       onMouseLeave={hide}
@@ -80,12 +104,25 @@ export function Tooltip({ label, shortcut, side = 'bottom', children }: TooltipP
         control at a panel's edge gave the states rail a horizontal scrollbar
         for a label nobody could see.
       */}
-      {visible ? (
-        <span className="tooltip" data-side={side} role="presentation">
-          {label}
-          {shortcut ? <kbd>{shortcut}</kbd> : null}
-        </span>
-      ) : null}
+      {visible
+        ? createPortal(
+            <span
+              ref={tipRef}
+              className="tooltip"
+              data-side={placement?.side ?? side}
+              role="presentation"
+              style={
+                placement
+                  ? { left: placement.left, top: placement.top }
+                  : { left: 0, top: 0, visibility: 'hidden' }
+              }
+            >
+              {label}
+              {shortcut ? <kbd>{shortcut}</kbd> : null}
+            </span>,
+            document.body,
+          )
+        : null}
     </span>
   )
 }

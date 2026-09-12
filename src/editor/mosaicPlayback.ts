@@ -162,7 +162,7 @@ export function paintMosaicFrame(
      * mosaic's, and only the outer radius (a clip on the group) changes.
      */
     if (role === 'extent') {
-      child.set({ fill: frame.background ?? 'transparent' })
+      child.set({ fill: frame.background ?? (child.get('restFill') as string | undefined) ?? 'transparent' })
       continue
     }
 

@@ -39,6 +39,8 @@ export interface UiState {
    * artboard stays still during layout work.
    */
   panelTab: PanelTab
+  /** Whether the projects drawer is out. Ephemeral: a session begins with it in. */
+  projectsOpen: boolean
   /** Set while Space is held, so pan is temporary and reverts on release. */
   temporaryTool: ToolId | null
   /**
@@ -173,6 +175,7 @@ export interface UiState {
   setTool: (tool: ToolId) => void
   setTheme: (theme: Theme) => void
   setPanelTab: (tab: PanelTab) => void
+  setProjectsOpen: (open: boolean) => void
   setTemporaryTool: (tool: ToolId | null) => void
   setEditingPoints: (id: string | null) => void
   setInsideFrame: (id: string | null) => void
@@ -249,6 +252,7 @@ export const useUiStore = create<UiState>()((set, get) => ({
   tool: 'select',
   theme: readTheme(typeof window === 'undefined' ? null : window.localStorage),
   panelTab: 'design',
+  projectsOpen: false,
   temporaryTool: null,
   editingPoints: null,
   insideFrame: null,
@@ -297,6 +301,7 @@ export const useUiStore = create<UiState>()((set, get) => ({
   // outlives a hot reload, so a session that was sitting on the old 'colour'
   // value would otherwise come back to a tab that no longer renders anything.
   setPanelTab: (panelTab) => set({ panelTab: panelTab === 'animate' ? 'animate' : 'design' }),
+  setProjectsOpen: (projectsOpen) => set({ projectsOpen }),
   setTemporaryTool: (temporaryTool) => set({ temporaryTool }),
   setEditingPoints: (editingPoints) => set({ editingPoints }),
   /*

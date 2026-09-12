@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 
-import { IconButton, Tooltip } from '../components/controls'
+import { Tooltip } from '../components/controls'
+import { Icon } from '../components/Icon'
 import { Logo } from '../components/Logo'
+import { useProjectsStore } from '../state/projectsStore'
 import { useDocumentStore } from '../state/documentStore'
 import { other } from '../state/theme'
 import { useUiStore } from '../state/uiStore'
@@ -20,18 +22,31 @@ import './panels.css'
  */
 export function TopBar() {
   const name = useDocumentStore((s) => s.doc.name)
-  const past = useDocumentStore((s) => s.past)
-  const future = useDocumentStore((s) => s.future)
   const [draftName, setDraftName] = useState(name)
   const theme = useUiStore((s) => s.theme)
   const setTheme = useUiStore((s) => s.setTheme)
   const switchTo = other(theme)
+  const projectsOpen = useUiStore((s) => s.projectsOpen)
+  const setProjectsOpen = useUiStore((s) => s.setProjectsOpen)
+  const projectCount = useProjectsStore((s) => s.projects.length)
 
   useEffect(() => setDraftName(name), [name])
 
   return (
     <header className="topbar">
       <div className="topbar__section">
+        {/* The way into the projects: a chevron toward the drawer's edge. */}
+        <Tooltip label={projectsOpen ? 'Hide projects' : `Show projects (${projectCount})`}>
+          <button
+            type="button"
+            className="topbar__projects"
+            aria-expanded={projectsOpen}
+            aria-label={`${projectCount} ${projectCount === 1 ? 'project' : 'projects'}`}
+            onClick={() => setProjectsOpen(!projectsOpen)}
+          >
+            <Icon name={projectsOpen ? 'chevronRight' : 'chevronLeft'} size={20} />
+          </button>
+        </Tooltip>
         {/*
           The mark is the light switch. Pressing it turns the palette over —
           the one control that is about the app itself rather than the
@@ -68,30 +83,7 @@ export function TopBar() {
         />
       </div>
 
-      <div className="topbar__section topbar__section--center">
-        <IconButton
-          icon="undo"
-          label="Undo"
-          shortcut="⌘Z"
-          disabled={past.length === 0}
-          onClick={() => useDocumentStore.getState().undo()}
-        />
-        <IconButton
-          icon="redo"
-          label="Redo"
-          shortcut="⇧⌘Z"
-          disabled={future.length === 0}
-          onClick={() => useDocumentStore.getState().redo()}
-        />
-      </div>
-
-      {/*
-        Zoom, fit and play live up here rather than floating over the artboard.
-        
-        They are about the VIEW rather than about the drawing, which is the same
-        thing undo and redo are — and a bar hovering over the canvas covers the
-        one thing it exists to help you look at.
-      */}
+      {/* Undo and redo live on the keyboard (⌘Z, ⇧⌘Z); the header keeps to the document and the view. */}
       <div className="topbar__section topbar__section--end">
         <ZoomControl />
         {/*

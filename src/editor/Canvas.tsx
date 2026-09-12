@@ -54,6 +54,9 @@ import { applyColourGuard } from './colourGuard'
 import { firstTile, tileAt } from '../mosaic/tiles'
 import { firstMeshTile, meshTileAt } from '../mesh/layout'
 import { evaluateMeshAtTime, meshAuthoredTimeFor, restingMeshFrame } from '../mesh/timeline'
+import { EmptyHints } from './EmptyHints'
+import { setLiveCanvas } from './liveCanvas'
+import { createWheelGesture } from './wheelGesture'
 import { newPaintCache, paintMeshFrame, type MeshPaintCache } from './meshPlayback'
 import { evaluateFrameAtTime, frameAuthoredTimeFor, valuesFor } from '../frame/frame'
 import { FrameLayer } from './FrameLayer'
@@ -164,6 +167,18 @@ export function EditorCanvas() {
   /** The frame drawn as a row of windows, one per state. */
   const spread = useUiStore((s) => s.spread)
   const frameSelection = useUiStore((s) => s.frameSelection)
+  const { stated } = useSelectedObject()
+  /**
+   * The object the plate stands under: the frame being worked inside, else
+   * the selected object with states. The canvas is built from it — an empty
+   * object leaves its own ground out while the plate is that ground.
+   */
+  const held =
+    useDocumentStore((s) =>
+      insideFrame && s.doc.objects[insideFrame]?.kind === 'frame' ? insideFrame : null,
+    ) ??
+    stated?.id ??
+    null
 
   /* --------------------------------------------------------- setup */
   useEffect(() => {
@@ -182,6 +197,7 @@ export function EditorCanvas() {
       stopContextMenu: true,
     })
     fabricRef.current = canvas
+    setLiveCanvas(canvas, () => renderedRef.current)
 
     // Dev-only handle, for inspecting canvas state from the console.
     if (import.meta.env.DEV) {
@@ -195,38 +211,21 @@ export function EditorCanvas() {
     // framed on every resize until the user zooms or pans themselves, which
     // also keeps the work in view as the window changes size.
     /*
-     * Where the stage's top-left corner is on screen, from one resize to the
-     * next. When it MOVES — anything standing to the left of or above the
-     * stage changing size — the artwork must not move with it: the canvas's
-     * origin is the stage's corner, so the same viewport would carry the
-     * drawing along by the shift. The pan is shifted back by exactly that, and
-     * the drawing stays where the eye left it. A resize that keeps the corner
-     * (the window growing at its right edge) changes nothing here. The panels
-     * float over the stage and never move its corner; this is for whatever
-     * one day does.
+     * The drawing travels with its stage.
+     *
+     * The canvas's origin is the stage's top-left corner, so when something
+     * standing to the left of the stage takes room — the projects drawer
+     * sliding out — the same viewport carries the drawing along by the shift.
+     * That is the point: the drawer PUSHES the work aside rather than sliding
+     * over it. An earlier version shifted the pan back to hold the drawing
+     * where the eye had left it, which made the drawer look like a cover.
      */
-    let origin: { left: number; top: number } | null = null
     const resize = new ResizeObserver(() => {
       const r = container.getBoundingClientRect()
       if (r.width === 0 || r.height === 0) return
 
       canvas.setDimensions({ width: r.width, height: r.height })
       useUiStore.getState().setStageSize({ width: r.width, height: r.height })
-
-      const moved = origin ? { left: r.left - origin.left, top: r.top - origin.top } : null
-      origin = { left: r.left, top: r.top }
-      if (moved && (moved.left !== 0 || moved.top !== 0)) {
-        const vt = canvas.viewportTransform
-        const panX = vt[4] - moved.left
-        const panY = vt[5] - moved.top
-        canvas.setViewportTransform([vt[0], vt[1], vt[2], vt[3], panX, panY])
-        // The store hears the NEW pan, or its mirror writes the old one back a
-        // frame later and the drawing slides after all.
-        const ui = useUiStore.getState()
-        ;(ui.viewportAdjusted ? ui.adjustViewport : ui.setViewport)({ zoom: vt[0], panX, panY })
-        canvas.renderAll()
-        return
-      }
 
       if (!useUiStore.getState().viewportAdjusted) {
         const artboard = useDocumentStore.getState().doc.artboard
@@ -251,6 +250,7 @@ export function EditorCanvas() {
 
     return () => {
       resize.disconnect()
+      setLiveCanvas(null)
       void canvas.dispose()
       fabricRef.current = null
       renderedRef.current.clear()
@@ -269,6 +269,7 @@ export function EditorCanvas() {
         mosaicStates,
         insideFrame,
         spread,
+        held,
         canvas,
         doc,
         textPaths,
@@ -307,7 +308,11 @@ export function EditorCanvas() {
      * And `spread`, which changes how many groups a frame is; `fits`
      * arrives with the text paths and is what each window is settled with.
      */
-  }, [textPaths, bandPaths, ribbons, fits, mosaicStates, insideFrame, spread])
+    /*
+     * And `held`, for the one thing it changes about the drawing: whether an
+     * empty object paints its own ground under the plate.
+     */
+  }, [textPaths, bandPaths, ribbons, fits, mosaicStates, insideFrame, spread, held])
 
   /* --------------------------------------------------- selection sync */
   useEffect(() => {
@@ -1185,8 +1190,11 @@ export function EditorCanvas() {
     const canvas = fabricRef.current
     if (!canvas) return
 
-    const onWheel = (opt: TPointerEventInfo<WheelEvent>): void => {
-      const e = opt.e
+    const container = containerRef.current
+    const gesture = createWheelGesture()
+
+    /** One wheel event, applied to the view; `at` is the cursor in the canvas's own pixels. */
+    const apply = (e: WheelEvent, at: { x: number; y: number }): void => {
       e.preventDefault()
       e.stopPropagation()
 
@@ -1194,7 +1202,7 @@ export function EditorCanvas() {
       if (e.ctrlKey || e.metaKey) {
         // Pinch or ctrl+wheel: zoom about the cursor.
         const zoom = clamp(canvas.getZoom() * 0.999 ** (e.deltaY * 4), MIN_ZOOM, MAX_ZOOM)
-        canvas.zoomToPoint(new Point(e.offsetX, e.offsetY), zoom)
+        canvas.zoomToPoint(new Point(at.x, at.y), zoom)
       } else {
         // Plain wheel: pan, which is what a trackpad two-finger scroll means.
         vt[4] -= e.deltaX
@@ -1203,10 +1211,42 @@ export function EditorCanvas() {
       }
       const next = canvas.viewportTransform
       useUiStore.getState().adjustViewport({ zoom: next[0], panX: next[4], panY: next[5] })
+      gesture.touch(performance.now())
+    }
+
+    const onWheel = (opt: TPointerEventInfo<WheelEvent>): void => {
+      apply(opt.e, { x: opt.e.offsetX, y: opt.e.offsetY })
+    }
+
+    /*
+     * Every wheel that is the canvas's but did not land on it.
+     *
+     * Seen first, at the window, before whatever is under the cursor can
+     * scroll with it. Two cases. Anything floating over the stage — the tool
+     * pill, the transport bar, the plate chips — is the canvas's ALWAYS: none
+     * of it scrolls, and a pan that begins with the cursor resting on the
+     * tools should pan. Anything outside the stage — the rail, the properties
+     * panel — is the canvas's only while its gesture is still in flight (see
+     * `wheelGesture.ts`), so a scroll that BEGINS on a panel is the panel's.
+     * The canvas element itself is left to Fabric, which raises `mouse:wheel`.
+     */
+    const stage = container?.closest('.app__stage') ?? container
+    const onWindowWheel = (e: WheelEvent): void => {
+      if (!container || !stage || !(e.target instanceof Node)) return
+      if (canvas.upperCanvasEl.contains(e.target) || canvas.lowerCanvasEl.contains(e.target)) return
+      const floating = stage.contains(e.target)
+      if (!floating && !gesture.holds(performance.now())) return
+      const rect = container.getBoundingClientRect()
+      apply(e, { x: e.clientX - rect.left, y: e.clientY - rect.top })
+      canvas.requestRenderAll()
     }
 
     canvas.on('mouse:wheel', onWheel)
-    return () => canvas.off('mouse:wheel', onWheel)
+    window.addEventListener('wheel', onWindowWheel, { capture: true, passive: false })
+    return () => {
+      canvas.off('mouse:wheel', onWheel)
+      window.removeEventListener('wheel', onWindowWheel, { capture: true })
+    }
   }, [])
 
   const selection = useDocumentStore((s) => s.selection)
@@ -1310,7 +1350,6 @@ export function EditorCanvas() {
    * glyph can be selected" while everything else had quietly gone dead.
    */
   /** The object with states selected as a whole, if one is — through the one selection rule. */
-  const { stated } = useSelectedObject()
   /** The frame being worked inside, which owns the canvas while it is. */
   const openFrame = (() => {
     const found = insideFrame ? objectsById[insideFrame] : undefined
@@ -1468,6 +1507,7 @@ export function EditorCanvas() {
       <SpreadChips canvas={fabricRef.current} object={spreadObject} />
       {/* The selected object's name, above it. */}
       <ObjectLabel canvas={fabricRef.current} />
+      <EmptyHints canvas={fabricRef.current} />
     </div>
   )
 }

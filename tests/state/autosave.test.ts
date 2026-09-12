@@ -9,6 +9,8 @@ import {
   saveAutosave,
   saveToLocalStorage,
 } from '../../src/state/persistence'
+import { readProject } from '../../src/state/projects'
+import { resetKeptForTests, useProjectsStore } from '../../src/state/projectsStore'
 import { PRIMITIVES } from '../../src/geometry/primitives'
 import type { TextShaperDocument, TypographyObject } from '../../src/types/document'
 
@@ -26,9 +28,31 @@ beforeEach(() => {
     removeItem: (k: string) => void store.delete(k),
   })
   vi.stubGlobal('window', { addEventListener: () => {}, removeEventListener: () => {} })
+  vi.stubGlobal('fetch', () => Promise.resolve(new Response(null, { status: 204 })))
   useDocumentStore.getState().loadDocument(createEmptyDocument())
+  useProjectsStore.setState({ projects: [], currentId: null, snapshot: () => null })
+  resetKeptForTests()
   vi.useFakeTimers()
 })
+
+/** The current project's document as storage holds it — where autosave writes now. */
+const savedDoc = (): TextShaperDocument | undefined => {
+  const id = useProjectsStore.getState().currentId
+  return id ? readProject(id).doc : undefined
+}
+/** How many writes landed on a project's own key. */
+const countProjectWrites = (): { count: () => number } => {
+  let writes = 0
+  vi.stubGlobal('localStorage', {
+    getItem: (k: string) => store.get(k) ?? null,
+    setItem: (k: string, v: string) => {
+      if (k.startsWith('text-shaper:project:') && !k.endsWith(':previous:v1')) writes++
+      store.set(k, v)
+    },
+    removeItem: (k: string) => void store.delete(k),
+  })
+  return { count: () => writes }
+}
 
 afterEach(() => {
   vi.useRealTimers()
@@ -70,33 +94,21 @@ function withShape(name = 'Ellipse'): TextShaperDocument {
 
 describe('keeping work across a reload', () => {
   it('writes the document once it settles', () => {
-    const stop = startAutosave({ kind: 'nothing' })
+    const stop = startAutosave(restoreAutosave())
     useDocumentStore.getState().loadDocument(withShape())
     // Nothing yet: it waits for the edits to stop.
-    expect(loadAutosave().ok).toBe(false)
+    expect(savedDoc()).toBeUndefined()
 
     vi.advanceTimersByTime(500)
-    const saved = loadAutosave()
-    expect(saved.ok).toBe(true)
-    expect(saved.doc?.objectOrder).toEqual(['a'])
+    expect(savedDoc()?.objectOrder).toEqual(['a'])
     stop()
   })
 
   it('writes once for a burst of edits, not once per edit', () => {
     // A drag streams updates at pointer rate. Serialising a document full of
     // path data on every one would be felt in the gesture.
-    const stop = startAutosave({ kind: 'nothing' })
-    let writes = 0
-    const real = localStorage.setItem
-    vi.stubGlobal('localStorage', {
-      getItem: (k: string) => store.get(k) ?? null,
-      setItem: (k: string, v: string) => {
-        writes++
-        real.call(null, k, v)
-        store.set(k, v)
-      },
-      removeItem: (k: string) => void store.delete(k),
-    })
+    const stop = startAutosave(restoreAutosave())
+    const writes = countProjectWrites()
 
     useDocumentStore.getState().loadDocument(withShape())
     for (let i = 0; i < 20; i++) {
@@ -104,7 +116,7 @@ describe('keeping work across a reload', () => {
       vi.advanceTimersByTime(20)
     }
     vi.advanceTimersByTime(500)
-    expect(writes).toBe(1)
+    expect(writes.count()).toBe(1)
     stop()
   })
 
@@ -112,8 +124,10 @@ describe('keeping work across a reload', () => {
     saveAutosave(withShape('Restored'))
     expect(useDocumentStore.getState().doc.objectOrder).toHaveLength(0)
 
-    expect(restoreAutosave()).toEqual({ kind: 'restored', from: 'current' })
+    // The single autosave of older builds comes back as project 1.
+    expect(restoreAutosave()).toEqual({ kind: 'restored', from: 'legacy' })
     expect(useDocumentStore.getState().doc.objects['a']?.name).toBe('Restored')
+    expect(useProjectsStore.getState().projects).toHaveLength(1)
   })
 
   it('refuses to overwrite a canvas that already has work on it', () => {
@@ -141,22 +155,22 @@ describe('keeping work across a reload', () => {
   })
 
   it('stops writing once torn down', () => {
-    const stop = startAutosave({ kind: 'nothing' })
+    const stop = startAutosave(restoreAutosave())
     stop()
     useDocumentStore.getState().loadDocument(withShape())
     vi.advanceTimersByTime(1000)
-    expect(loadAutosave().ok).toBe(false)
+    expect(savedDoc()).toBeUndefined()
   })
 
   it('does not disturb an explicit save', () => {
     // Autosave follows whatever is on screen; Save is a checkpoint the user
     // chose. Sharing one key would destroy the second on the next keystroke.
     saveToLocalStorage(withShape('Checkpoint'))
-    const stop = startAutosave({ kind: 'nothing' })
+    const stop = startAutosave(restoreAutosave())
     useDocumentStore.getState().loadDocument(withShape('Working'))
     vi.advanceTimersByTime(500)
 
-    expect(loadAutosave().doc?.objects['a']?.name).toBe('Working')
+    expect(savedDoc()?.objects['a']?.name).toBe('Working')
     expect(store.get('text-shaper:document:v1')).toContain('Checkpoint')
     stop()
   })
@@ -172,7 +186,7 @@ describe('keeping work across a reload', () => {
       removeItem: () => {},
     })
     expect(() => restoreAutosave()).not.toThrow()
-    const stop = startAutosave({ kind: 'nothing' })
+    const stop = startAutosave(restoreAutosave())
     useDocumentStore.getState().loadDocument(withShape())
     expect(() => vi.advanceTimersByTime(500)).not.toThrow()
     stop()
@@ -223,7 +237,7 @@ describe('a session that starts badly', () => {
     store.set('text-shaper:autosave:previous:v1', serialized(withShape('Yesterday')))
     store.set('text-shaper:autosave:v1', unreadable())
 
-    expect(restoreAutosave()).toEqual({ kind: 'restored', from: 'previous' })
+    expect(restoreAutosave()).toEqual({ kind: 'restored', from: 'legacy' })
     expect(useDocumentStore.getState().doc.objects['a']?.name).toBe('Yesterday')
   })
 
@@ -232,11 +246,12 @@ describe('a session that starts badly', () => {
     useDocumentStore.getState().loadDocument(createEmptyDocument())
 
     const stop = startAutosave(restoreAutosave())
+    const id = useProjectsStore.getState().currentId as string
     useDocumentStore.getState().loadDocument(withShape('Newer'))
     vi.advanceTimersByTime(500)
 
-    expect(loadAutosave().doc?.objects['a']?.name).toBe('Newer')
-    expect(store.get('text-shaper:autosave:previous:v1')).toContain('Inherited')
+    expect(savedDoc()?.objects['a']?.name).toBe('Newer')
+    expect(store.get(`text-shaper:project:${id}:previous:v1`)).toContain('Inherited')
     stop()
   })
 })
@@ -247,7 +262,7 @@ describe('an empty canvas', () => {
     store.set('text-shaper:autosave:v1', '{ not json')
     useDocumentStore.getState().loadDocument(createEmptyDocument())
 
-    const stop = startAutosave({ kind: 'nothing' })
+    const stop = startAutosave(restoreAutosave())
     useDocumentStore.getState().setSelection([])
     useDocumentStore.getState().loadDocument(createEmptyDocument())
     vi.advanceTimersByTime(2000)
@@ -258,23 +273,23 @@ describe('an empty canvas', () => {
 
   it('IS written once the user emptied it themselves', () => {
     // Deleting everything is a decision, and undoing it is what history is for.
-    const stop = startAutosave({ kind: 'nothing' })
+    const stop = startAutosave(restoreAutosave())
     useDocumentStore.getState().loadDocument(withShape('Doomed'))
     vi.advanceTimersByTime(500)
-    expect(loadAutosave().doc?.objectOrder).toEqual(['a'])
+    expect(savedDoc()?.objectOrder).toEqual(['a'])
 
     useDocumentStore.getState().deleteObjects(['a'])
     useDocumentStore.getState().commit('Delete everything')
     vi.advanceTimersByTime(500)
 
-    expect(loadAutosave().doc?.objectOrder).toEqual([])
+    expect(savedDoc()?.objectOrder).toEqual([])
     stop()
   })
 })
 
 describe('what counts as a change worth writing', () => {
   it('ignores a selection, which is not work', () => {
-    const stop = startAutosave({ kind: 'nothing' })
+    const stop = startAutosave(restoreAutosave())
     useDocumentStore.getState().loadDocument(withShape())
     vi.advanceTimersByTime(500)
 

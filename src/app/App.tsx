@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 
 import { EditorCanvas } from '../editor/Canvas'
+import { snapshotArtwork } from '../editor/liveCanvas'
+import { ProjectsDrawer } from '../editor/ProjectsDrawer'
 import { PropertiesPanel } from '../editor/PropertiesPanel'
 import { StatesRail } from '../editor/StatesRail'
 import { Toolbar } from '../editor/Toolbar'
@@ -11,6 +13,7 @@ import { initClipper } from '../geometry/clipper'
 import { DEFAULT_FONT_ID } from '../fonts/manifest'
 import { restoreAutosave, startAutosave } from '../state/autosave'
 import { useDocumentStore } from '../state/documentStore'
+import { useProjectsStore } from '../state/projectsStore'
 import { useUiStore } from '../state/uiStore'
 import { forgetTokens } from '../editor/colours'
 import { applyTheme, writeTheme } from '../state/theme'
@@ -85,52 +88,57 @@ export function App() {
    * restore could read it.
    */
   useEffect(() => {
+    // How a project is pictured on its card: the editor's canvas, cropped to the artwork.
+    useProjectsStore.getState().setSnapshot(snapshotArtwork)
     // What the restore found decides what autosave may do: a snapshot this build
     // cannot read must not be written over. See `startAutosave`.
     return startAutosave(restoreAutosave())
   }, [])
+  const projectsOpen = useUiStore((s) => s.projectsOpen)
 
   const ready = fontLoaded && clipperReady
 
   return (
-    <div className="app">
-      <TopBar />
-      <div className="app__body">
-        <StatesRail />
-        <main className="app__stage">
-          <EditorCanvas />
-          {/*
+    <div className="app" data-projects={projectsOpen}>
+      {/* Beside the whole app, top bar included: it pushes everything, covers nothing. */}
+      <ProjectsDrawer />
+      <div className="app__main">
+        <TopBar />
+        <div className="app__body">
+          <StatesRail />
+          <main className="app__stage">
+            <EditorCanvas />
+            {/*
             The tools float over the stage rather than standing beside it: a
             child of the stage so they follow its edges, and an absolute one so
             the canvas underneath is still measured by the stage's own box.
           */}
-          <Toolbar />
-          {!ready || loadError ? (
-            <div className="loading-overlay" role="status" aria-live="polite">
-              {loadError ? (
-                <>
-                  <span>{loadError}</span>
-                  <span className="loading-overlay__detail">
-                    Reload the page to try again.
-                  </span>
-                </>
-              ) : (
-                <>
-                  <span>Starting the typography engine…</span>
-                  <span className="loading-overlay__bar" />
-                </>
-              )}
-            </div>
-          ) : null}
-        </main>
-        {/*
+            <Toolbar />
+            {!ready || loadError ? (
+              <div className="loading-overlay" role="status" aria-live="polite">
+                {loadError ? (
+                  <>
+                    <span>{loadError}</span>
+                    <span className="loading-overlay__detail">Reload the page to try again.</span>
+                  </>
+                ) : (
+                  <>
+                    <span>Starting the typography engine…</span>
+                    <span className="loading-overlay__bar" />
+                  </>
+                )}
+              </div>
+            ) : null}
+          </main>
+          {/*
           The layers list is not mounted. With one shape at a time it was a
           panel showing a list of one, taking a third of the sidebar to do it.
           `editor/LayersPanel.tsx` is still there for when there is a reason to
           bring it back.
         */}
-        <div className="app__sidebar">
-          <PropertiesPanel warnings={warnings} autoSizes={autoSizes} lineCounts={lineCounts} />
+          <div className="app__sidebar">
+            <PropertiesPanel warnings={warnings} autoSizes={autoSizes} lineCounts={lineCounts} />
+          </div>
         </div>
       </div>
     </div>

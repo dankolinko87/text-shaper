@@ -1,5 +1,7 @@
 import { useDocumentStore } from './documentStore'
 import { deserializeDocument } from './persistence'
+import { isEnvelope, restoreEnvelope } from './projects'
+import { useProjectsStore } from './projectsStore'
 
 /**
  * The dev server's copy of the autosave — see `vite/fileAutosave.ts`.
@@ -45,8 +47,23 @@ export async function restoreFileAutosave(): Promise<boolean> {
   if (!raw) return false
   const state = useDocumentStore.getState()
   if (state.doc.objectOrder.length > 0 || state.past.length > 0) return false
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return false
+  }
+  if (isEnvelope(parsed)) {
+    // The whole workspace: into storage, then opened the way a boot opens it.
+    if (!restoreEnvelope(parsed)) return false
+    const restored = useProjectsStore.getState().restoreWorkspace()
+    return restored.kind === 'restored'
+  }
+  // A file from before there were projects: one document, which becomes project 1.
   const result = deserializeDocument(raw)
   if (!result.ok || !result.doc || result.doc.objectOrder.length === 0) return false
   state.loadDocument(result.doc)
+  useProjectsStore.getState().adoptDocument(result.doc)
   return true
 }

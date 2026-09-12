@@ -148,25 +148,29 @@ describe('the spread', () => {
 })
 
 describe('the plate behind a held frame', () => {
-  it('pads a collapsed frame evenly, with no room on top for chips it does not have', () => {
+  it('is exactly the box of a collapsed frame: a ground under it, not a margin round it', () => {
     const object = frameIn()
-    const plate = plateBounds(object, false, 1)
-    const box = object.localBounds
-    const side = box.x - plate.x
-    expect(side).toBeGreaterThan(0)
-    expect(plate.width - box.width, 'the same on both sides').toBeCloseTo(side * 2, 6)
-    expect(box.y - plate.y, 'and on top').toBeCloseTo(side, 6)
-    expect(plate.height - box.height, 'and below').toBeCloseTo(side * 2, 6)
+    expect(plateBounds(object, false, 1)).toEqual(object.localBounds)
   })
 
-  it('pads a mosaic the same way, from its own box', () => {
+  it('is exactly a collapsed mosaic’s own box too', () => {
     const box = { x: -60, y: -60, width: 120, height: 120 }
     const mosaic = { kind: 'mosaic', localBounds: box, transform: { scaleX: 1, scaleY: 1 } } as never
-    const plate = plateBounds(mosaic, false, 1)
+    expect(plateBounds(mosaic, false, 1)).toEqual(box)
+  })
+
+  it('pads a spread row evenly at the sides and below, where the plate is taken hold of', () => {
+    const box = { x: -60, y: -60, width: 120, height: 120 }
+    const mosaic = {
+      kind: 'mosaic',
+      localBounds: box,
+      transform: { scaleX: 1, scaleY: 1 },
+      states: [{}, {}],
+    } as never
+    const plate = plateBounds(mosaic, true, 1)
     const side = box.x - plate.x
     expect(side).toBeGreaterThan(0)
-    expect(box.y - plate.y).toBeCloseTo(side, 6)
-    expect(plate.width - box.width).toBeCloseTo(side * 2, 6)
+    expect(plate.y, 'and room on top for the chips').toBeLessThan(box.y - side)
   })
 
   it('makes screen-sized room for the number chips above a spread row', () => {

@@ -121,6 +121,12 @@
   /* Behind a spread frame's row of states: a mid grey that reads on any page colour. */
   /* The plate behind a held object with states: the selection colour, washed. */
   --spread-plate: rgba(23, 138, 111, 0.12);
+  /*
+   * The ground an EMPTY object stands on when nothing holds it: a step off
+   * the page in the page's own grey, so it is a place and not a selection.
+   * Translucent, so it steps off whatever the artboard's colour is.
+   */
+  --empty-ground: rgba(232, 234, 237, 0.07);
 
   /*
    * Controls that hold a chosen state: the track a segment sits in, the
@@ -198,6 +204,7 @@
   --well-raised: #ffffff;
   --well-raised-shadow: 0 1px 2px rgba(20, 22, 26, 0.14);
   --chip-active: #e3e3e0;
+  --empty-ground: rgba(27, 29, 33, 0.07);
 
   /* The tool pill in white, as Figma's is: ink glyphs, a hairline, its shadow doing the lifting. */
   --tool-pill-bg: #ffffff;

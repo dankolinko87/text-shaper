@@ -17,6 +17,7 @@ import {
   Hand,
   LayoutDashboard,
   Waypoints,
+  X,
   Lock,
   LockOpen,
   Maximize,
@@ -79,6 +80,7 @@ export type IconName =
   | 'more'
   | 'pipette'
   | 'collapse'
+  | 'close'
   | 'splitHorizontal'
 
 /**
@@ -170,6 +172,8 @@ const ICONS: Record<IconName, LucideIcon> = {
   // The spread's other half: one window again. The same glyph as `stop`, which
   // is fine — a square is a square, and the two never share a bar.
   collapse: Square,
+  // Shut a drawer: the plain cross every window has, not the spread's square.
+  close: X,
   splitHorizontal: Rows2,
   download: Download,
   frame: Frame,
