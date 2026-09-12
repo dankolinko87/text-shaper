@@ -9,7 +9,7 @@ import {
   nodesMovedBy,
   thicknessFloor,
 } from '../../src/mesh/edit'
-import { isSimple, polygonArea, seedMesh } from '../../src/mesh/mesh'
+import { MINIMUM_VISIBLE, isSimple, polygonArea, seedMesh } from '../../src/mesh/mesh'
 import type { Vec2 } from '../../src/types/document'
 
 /**
@@ -158,6 +158,33 @@ describe('dragNodes', () => {
     // It went SOMEWHERE — a clamp is not a refusal.
     expect(at.x).toBeGreaterThan(-50)
     expect(legal(tiles, { ...positions, [topLeft]: at }, new Set([topLeft]), thicknessFloor(spacing))).toBe(true)
+  })
+
+  it('still reshapes a cell that is already thinner than the floor, down to the visible minimum', () => {
+    // A 100-unit cell whose spacing asks for more thickness than it has —
+    // the gap and inset were raised after the cell was made. Every node on
+    // it used to be frozen, the drag clamped to nothing and drawn as such.
+    const { positions, tiles, nodeNear } = grid(1, 1)
+    const wide = { gap: 60, glyphInset: 40 }
+    expect(thicknessFloor(wide)).toBeGreaterThan(100)
+    const topLeft = nodeNear(-50, -50)
+    const out = dragNodes(tiles, positions, [topLeft], topLeft, { x: -30, y: -30 }, { spacing: wide })
+    expect(out.clamped).toBe(false)
+    expect(out.updates[0]?.at).toEqual({ x: -80, y: -80 })
+    const inward = dragNodes(tiles, positions, [topLeft], topLeft, { x: 0, y: 30 }, { spacing: wide })
+    expect(inward.clamped).toBe(false)
+    expect(inward.updates[0]?.at).toEqual({ x: -50, y: -20 })
+    // But never to nothing: pulled past the far side it is held where the cell still stands.
+    const through = dragNodes(tiles, positions, [topLeft], topLeft, { x: 0, y: 200 }, { spacing: wide })
+    expect(through.clamped).toBe(true)
+    const at = through.updates[0]?.at as Vec2
+    expect(at.y).toBeLessThan(50 - MINIMUM_VISIBLE + 1e-6)
+    expect(at.y).toBeGreaterThan(-50)
+    // A cell that meets the floor is still held to it.
+    const floor = thicknessFloor(spacing)
+    const held = dragNodes(tiles, positions, [topLeft], topLeft, { x: 0, y: 200 }, { spacing })
+    const ring = tiles[0]!.ring.map((id) => (id === topLeft ? (held.updates[0]!.at as Vec2) : (positions[id] as Vec2)))
+    expect(legal(tiles, Object.fromEntries(tiles[0]!.ring.map((id, i) => [id, ring[i]!])), new Set([topLeft]), floor)).toBe(true)
   })
 
   it('returns every moved node even when the pointer is back where it began', () => {

@@ -176,6 +176,36 @@ function convexAndPositive(quad: readonly Vec2[]): boolean {
   return polygonArea(quad) > EPSILON
 }
 
+/** The corners a tile's cell is drawn from, each once — a triangle repeats its tip. */
+function distinctCorners(tile: MeshTile, positions: Positions): Vec2[] | null {
+  const corners = tile.corners.map((id) => positions[id])
+  if (corners.some((p) => !p)) return null
+  return corners.filter(
+    (p, i) => corners.findIndex((q) => q === p || (q && p && q.x === p.x && q.y === p.y)) === i,
+  ) as Vec2[]
+}
+
+/**
+ * How thick a cell is at its thinnest: the least distance from any corner to
+ * the line of an edge it is not on. Infinity for a cell with no corners to
+ * measure between.
+ */
+export function tileThickness(tile: MeshTile, positions: Positions): number {
+  const distinct = distinctCorners(tile, positions)
+  if (!distinct || distinct.length < 3) return Infinity
+  const n = distinct.length
+  let least = Infinity
+  for (let i = 0; i < n; i++) {
+    const a = distinct[i] as Vec2
+    const b = distinct[(i + 1) % n] as Vec2
+    for (let j = 0; j < n; j++) {
+      if (j === i || j === (i + 1) % n) continue
+      least = Math.min(least, distanceToLine(distinct[j] as Vec2, a, b))
+    }
+  }
+  return least
+}
+
 /**
  * Whether every tile touching a moved node is still a cell a letter can be
  * poured into, and whether any moved edge has been dragged across another.
@@ -184,12 +214,25 @@ function convexAndPositive(quad: readonly Vec2[]): boolean {
  * everywhere for the insets; no edge at a moved node crossing an edge of any
  * tile that shares a node with a touched tile. `floor` is what
  * `thicknessFloor` gives for the state's spacing.
+ *
+ * Two tiers. A cell that meets the floor may not be dragged under it. A cell
+ * ALREADY under it — the gap or the inset was raised after it was drawn, or
+ * it was made small and the spacing never followed — is held only to the
+ * visible minimum: the letter has no room in it either way, and that is the
+ * spacing's fault, not the geometry's. Judged against the floor alone, every
+ * node on such a cell was frozen and every drag on it clamped to nothing,
+ * drawn in the limit colour, which read as the mesh refusing to be edited.
+ * "No thinner than it was" would not do either: tilting any edge of a
+ * rectangle thins it a hair by this measure, so a corner could still not be
+ * pulled. `was` is where the nodes stood before the move; without it the
+ * floor is absolute.
  */
 export function legal(
   tiles: readonly MeshTile[],
   positions: Positions,
   moved: ReadonlySet<string>,
   floor: number,
+  was?: Positions,
 ): boolean {
   const touched = tiles.filter((tile) => tile.ring.some((id) => moved.has(id)))
   const at = (id: string): Vec2 | undefined => positions[id]
@@ -200,23 +243,11 @@ export function legal(
     const points = ring as Vec2[]
     if (!(polygonArea(points) > EPSILON) || !isSimple(points)) return false
 
-    const corners = tile.corners.map(at)
-    if (corners.some((p) => !p)) return false
-    // A triangle repeats its tip: three distinct corners still make a cell.
-    const distinct = corners.filter(
-      (p, i) => corners.findIndex((q) => q === p || (q && p && q.x === p.x && q.y === p.y)) === i,
-    ) as Vec2[]
-    if (distinct.length < 3) return false
+    const distinct = distinctCorners(tile, positions)
+    if (!distinct || distinct.length < 3) return false
     if (!convexAndPositive(distinct)) return false
-    const n = distinct.length
-    for (let i = 0; i < n; i++) {
-      const a = distinct[i] as Vec2
-      const b = distinct[(i + 1) % n] as Vec2
-      for (let j = 0; j < n; j++) {
-        if (j === i || j === (i + 1) % n) continue
-        if (distanceToLine(distinct[j] as Vec2, a, b) < floor) return false
-      }
-    }
+    const least = was && tileThickness(tile, was) < floor ? MINIMUM_VISIBLE : floor
+    if (tileThickness(tile, positions) < least) return false
   }
 
   // Crossings: every edge at a moved node against every edge nearby.
@@ -294,7 +325,7 @@ export function dragNodes(
           y: snapPosition(origin.y + offset.y, step) - origin.y,
         }
       : offset
-  const ok = (offset: Vec2): boolean => legal(tiles, place(offset), set, floor)
+  const ok = (offset: Vec2): boolean => legal(tiles, place(offset), set, floor, before)
 
   let offset = snapped(delta)
   let clamped = false
