@@ -1,4 +1,5 @@
-import { solidOf } from '../typography/paint'
+import { paintCss } from './gradientCss'
+import type { ImageAsset } from '../types/paint'
 import { useState } from 'react'
 import { useUiStore } from '../state/uiStore'
 
@@ -11,6 +12,7 @@ import './panels.css'
 export function LayersPanel() {
   const order = useDocumentStore((s) => s.doc.objectOrder)
   const objects = useDocumentStore((s) => s.doc.objects)
+  const assets = useDocumentStore((s) => s.doc.assets)
   const selection = useDocumentStore((s) => s.selection)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [draftName, setDraftName] = useState('')
@@ -70,7 +72,7 @@ export function LayersPanel() {
                     }
                   }}
                 >
-                  <span className="layer__swatch" style={{ background: layerSwatch(object) }} />
+                  <span className="layer__swatch" style={{ background: layerSwatch(object, assets) }} />
 
                   {editingId === id ? (
                     <input
@@ -172,15 +174,15 @@ export function LayerWarning({ message }: { message: string }) {
  * the tiles are bare. A frame has no colour of its own — it is a place, not a
  * mark — so it borrows its first member's.
  */
-function layerSwatch(object: DocumentObject): string {
-  if (object.kind === 'typography') return solidOf(object.appearance.textFill)
+function layerSwatch(object: DocumentObject, assets: Readonly<Record<string, ImageAsset>>): string {
+  if (object.kind === 'typography') return paintCss(object.appearance.textFill, assets)
   if (object.kind === 'frame') {
     const first = object.members[0]
-    return first ? layerSwatch(first.object) : '#101014'
+    return first ? layerSwatch(first.object, assets) : '#101014'
   }
   const state = object.states[useUiStore.getState().mosaicStates[object.id] ?? 0] ?? object.states[0]
   const tile = Object.values(state?.tileColour ?? {}).find((c) => c !== null)
-  return solidOf(tile ?? Object.values(state?.glyphColour ?? {})[0] ?? '#101014')
+  return paintCss(tile ?? Object.values(state?.glyphColour ?? {})[0] ?? '#101014', assets)
 }
 
 /** What the layer is OF, in a few characters — the text, or the letters. */

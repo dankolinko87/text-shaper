@@ -10,7 +10,6 @@ export function ZoomControl() {
   // zoom's centre and the canvas's cannot disagree by a resize step.
   const stageWidth = useUiStore((s) => s.stageWidth)
   const stageHeight = useUiStore((s) => s.stageHeight)
-  const playing = useUiStore((s) => s.playing)
 
   const setZoomAboutCentre = (next: number): void => {
     const state = useUiStore.getState()
@@ -54,25 +53,31 @@ export function ZoomControl() {
         {Math.round(zoom * 100)}%
       </button>
       <span className="zoom-control__divider" role="separator" />
-      <IconButton icon="fit" label="Fit artboard" shortcut="⇧1" tooltipSide="top" onClick={fit} />
-      <span className="zoom-control__divider" role="separator" />
-      {/*
-        Play lives down here rather than on the Animate tab because it is not
-        about one object: it runs everything that moves, at once, whichever panel
-        happens to be open and whatever is selected. The Animate tab keeps its
-        own preview of the object being worked on — that answers "what does this
-        setting do", and this answers "what does the whole thing look like".
-
-        No keyboard shortcut. Space is already the temporary-pan hold, and a
-        second meaning on the key you lean on to move around would be a trap.
-      */}
-      <IconButton
-        icon={playing ? 'pause' : 'play'}
-        label={playing ? 'Stop animation' : 'Play all animations'}
-        active={playing}
-        tooltipSide="top"
-        onClick={() => useUiStore.getState().setPlaying(!playing)}
-      />
+      <IconButton icon="fit" label="Fit artboard" shortcut="⇧1" onClick={fit} />
     </div>
+  )
+}
+
+/**
+ * Play, on its own.
+ *
+ * It runs everything that moves, at once, whichever panel happens to be open
+ * and whatever is selected — the Animate tab keeps its own preview of the
+ * object being worked on. Its own control rather than a corner of the zoom
+ * group because it is one of the two things the header keeps when the window
+ * is narrow, and the zoom is not.
+ *
+ * No keyboard shortcut. Space is already the temporary-pan hold, and a second
+ * meaning on the key you lean on to move around would be a trap.
+ */
+export function PlayButton() {
+  const playing = useUiStore((s) => s.playing)
+  return (
+    <IconButton
+      icon={playing ? 'pause' : 'play'}
+      label={playing ? 'Stop animation' : 'Play all animations'}
+      active={playing}
+      onClick={() => useUiStore.getState().setPlaying(!playing)}
+    />
   )
 }

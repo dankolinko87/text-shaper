@@ -1,5 +1,5 @@
-import { solidOf } from '../typography/paint'
-import { svgPaints } from './svgPaint'
+import { svgPaints, type AnyPaint } from './svgPaint'
+import { pathBounds } from '../geometry/path'
 import { useMemo, type ReactElement } from 'react'
 
 import { memberAtState, stateShape, valuesFor } from '../frame/frame'
@@ -7,7 +7,6 @@ import { dashArrayFor, strokePaint } from '../geometry/stroke'
 import { useDocumentStore } from '../state/documentStore'
 import { fitObject, frameAt, pourThrough, stillFrame } from '../typography/objectFit'
 import { isFontLoaded } from '../typography/fontRegistry'
-import type { FillPaint } from '../typography/colour'
 import type { FrameObject, TypographyObject } from '../types/document'
 import type { FrameMember, FrameState } from '../types/frame'
 
@@ -79,13 +78,13 @@ export interface MemberArtwork {
   memberId: string
   /** The container's own outline, as the state has it. */
   container: string
-  containerFill: string | null
-  stroke: { colour: string; width: number; dash: number[] | null } | null
+  containerFill: AnyPaint | null
+  stroke: { colour: AnyPaint; width: number; dash: number[] | null } | null
   /** The type, as fitted and — if the state reshaped the member — poured. */
   text: string | null
-  textFill: string | null
+  textFill: AnyPaint | null
   band: string | null
-  bandFill: string | null
+  bandFill: AnyPaint | null
   transform: FrameMember['object']['transform']
   opacity: number
 }
@@ -128,13 +127,13 @@ function artworkFor(
   const border = drawn.appearance.containerStroke
   const stroke =
     border && border.width > 0
-      ? { colour: solidOf(border.colour), width: strokePaint(border).width, dash: dashArrayFor(border) }
+      ? { colour: border.colour, width: strokePaint(border).width, dash: dashArrayFor(border) }
       : null
 
   const base: MemberArtwork = {
     memberId: member.id,
     container: drawn.currentSourcePath,
-    containerFill: drawn.appearance.containerFill ? solidOf(drawn.appearance.containerFill) : null,
+    containerFill: drawn.appearance.containerFill,
     stroke,
     text: null,
     textFill: null,
@@ -163,18 +162,10 @@ function artworkFor(
   return {
     ...base,
     text: frame.path,
-    textFill: solid(frame.textFill) ?? solidOf(drawn.appearance.textFill),
+    textFill: frame.textFill,
     band: frame.bandPath,
-    bandFill: frame.bandFill ? (solid(frame.bandFill) ?? solidOf(drawn.appearance.lineFill)) : null,
+    bandFill: frame.bandFill,
   }
-}
-
-/** A paint as one colour; a gradient answers with the colour it starts from. */
-function solid(paint: FillPaint | null | undefined): string | null {
-  if (!paint) return null
-  if (paint.kind === 'solid') return paint.colour
-  if (paint.kind === 'image') return '#888888'
-  return paint.stops[0]?.colour ?? null
 }
 
 function draw(object: FrameObject, state: FrameState): ReactElement {
@@ -197,18 +188,24 @@ function draw(object: FrameObject, state: FrameState): ReactElement {
             transform={`translate(${t.x} ${t.y}) rotate(${t.rotation}) scale(${sx} ${sy})`}
             opacity={each.opacity}
           >
-            {each.containerFill ? <path d={each.container} fill={each.containerFill} /> : null}
+            {each.containerFill ? (
+              <path d={each.container} fill={paints.fill(each.containerFill, pathBounds(each.container))} />
+            ) : null}
             {each.stroke ? (
               <path
                 d={each.container}
                 fill="none"
-                stroke={each.stroke.colour}
+                stroke={paints.fill(each.stroke.colour, pathBounds(each.container))}
                 strokeWidth={each.stroke.width}
                 strokeDasharray={each.stroke.dash ? each.stroke.dash.join(' ') : undefined}
               />
             ) : null}
-            {each.band && each.bandFill ? <path d={each.band} fill={each.bandFill} /> : null}
-            {each.text && each.textFill ? <path d={each.text} fill={each.textFill} /> : null}
+            {each.band && each.bandFill ? (
+              <path d={each.band} fill={paints.fill(each.bandFill, pathBounds(each.band))} />
+            ) : null}
+            {each.text && each.textFill ? (
+              <path d={each.text} fill={paints.fill(each.textFill, pathBounds(each.text))} />
+            ) : null}
           </g>
         )
       })}

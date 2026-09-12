@@ -8,6 +8,7 @@ import { selectionColour } from './colours'
 import { frameCorners } from './frameBoxes'
 import { pressOutside } from './stated'
 import { windowOffset } from './renderer'
+import { membersOf } from './memberTarget'
 import { outlineToPath, pathToOutline } from '../geometry/outline'
 
 /**
@@ -136,18 +137,18 @@ export function FrameLayer({
     const shownState = (target: FrameObject) =>
       Math.min(useUiStore.getState().mosaicStates[target.id] ?? 0, target.states.length - 1)
 
-    /** The member a gesture began on, and which modifiers it began with. */
-    let gesture: { member: string; takeOut: boolean; cloned: boolean } | null = null
+    /** The members a gesture began on — one, or a whole selection of them — and which modifiers it began with. */
+    let gesture: { members: string[]; takeOut: boolean; cloned: boolean } | null = null
 
     const onDown = (opt: { e: Event; target?: FabricObject }): void => {
       const target = live()
       if (!target) return
       const mouse = opt.e as MouseEvent
-      const memberId = opt.target?.get('memberId') as string | undefined
+      const members = membersOf(opt.target)
 
-      if (memberId) {
+      if (members.length > 0) {
         gesture = {
-          member: memberId,
+          members,
           // Held from the press: a modifier let go mid-drag should not change
           // what the gesture was.
           takeOut: mouse.metaKey || mouse.ctrlKey,
@@ -191,9 +192,9 @@ export function FrameLayer({
       const target = live()
       if (!target) return
       gesture.cloned = true
-      if (useDocumentStore.getState().duplicateFrameMember(target.id, gesture.member)) {
-        useDocumentStore.getState().commit('Duplicate in frame')
-      }
+      const store = useDocumentStore.getState()
+      const copied = gesture.members.filter((member) => store.duplicateFrameMember(target.id, member))
+      if (copied.length > 0) useDocumentStore.getState().commit('Duplicate in frame')
     }
 
     const onUp = (): void => {
@@ -211,7 +212,7 @@ export function FrameLayer({
       const target = live()
       if (!target) return
       const store = useDocumentStore.getState()
-      if (store.removeFromFrame(target.id, [finished.member], shownState(target))) {
+      if (store.removeFromFrame(target.id, finished.members, shownState(target))) {
         store.commit('Take out of frame')
         const ui = useUiStore.getState()
         ui.setFrameSelection([])

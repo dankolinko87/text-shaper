@@ -1,4 +1,12 @@
 import {
+  AlignCenterHorizontal,
+  AlignCenterVertical,
+  AlignEndHorizontal,
+  AlignEndVertical,
+  AlignHorizontalDistributeCenter,
+  AlignStartHorizontal,
+  AlignStartVertical,
+  AlignVerticalDistributeCenter,
   Brush,
   Download,
   Frame,
@@ -21,6 +29,7 @@ import {
   Lock,
   LockOpen,
   Maximize,
+  Menu as MenuIcon,
   Minus,
   MousePointer2,
   Pause,
@@ -89,6 +98,15 @@ export type IconName =
   | 'crop'
   | 'square'
   | 'blend'
+  | 'alignLeft'
+  | 'alignHCentre'
+  | 'alignRight'
+  | 'alignTop'
+  | 'alignVCentre'
+  | 'alignBottom'
+  | 'distributeH'
+  | 'distributeV'
+  | 'menu'
 
 /**
  * The three sizes an icon may be, and there are only three on purpose.
@@ -172,6 +190,22 @@ const ICONS: Record<IconName, LucideIcon> = {
    * glyph meaning two things is a bug waiting for a careless glance.
    */
   spread: GalleryHorizontal,
+  // Three lines: the way into the projects, as every app's drawer is opened.
+  menu: MenuIcon,
+  /*
+   * Lining things up, named for what they DO. Lucide names these by the axis
+   * of the guide line — `AlignStartVertical` is a vertical line with boxes
+   * against it, which is aligning LEFT — and that reads backwards at every
+   * call site, so the table takes the translation once.
+   */
+  alignLeft: AlignStartVertical,
+  alignHCentre: AlignCenterVertical,
+  alignRight: AlignEndVertical,
+  alignTop: AlignStartHorizontal,
+  alignVCentre: AlignCenterHorizontal,
+  alignBottom: AlignEndHorizontal,
+  distributeH: AlignHorizontalDistributeCenter,
+  distributeV: AlignVerticalDistributeCenter,
   // Three dots: a few more actions, kept behind one glyph until wanted.
   more: Ellipsis,
   // The eyedropper: pick a colour from anything on the screen.
@@ -190,15 +224,6 @@ const ICONS: Record<IconName, LucideIcon> = {
   square: Square,
   blend: Blend,
 }
-
-/**
- * Filled, unlike the outlined tools.
- *
- * These are transport controls — a state to switch rather than a place to point
- * at — and a hollow triangle reads as an arrow rather than as Play. Carried over
- * from the hand-drawn set, where it was a deliberate choice worth keeping.
- */
-const FILLED = new Set<IconName>(['play', 'pause', 'stop'])
 
 /**
  * The stroke, in the icons' own 24px units.
@@ -228,17 +253,19 @@ export function FlyoutMarker() {
   return <ChevronDown size={10} strokeWidth={2.6} aria-hidden="true" focusable="false" />
 }
 
+/*
+ * Every glyph is an outline — the transport controls too. Play, pause and
+ * stop used to be filled, a hand-drawn habit carried over; in a header of
+ * hairline icons a solid triangle was the one heavy thing on the row.
+ */
 export function Icon({ name, size = DEFAULT_SIZE }: IconProps) {
   const Glyph = ICONS[name]
-  const filled = FILLED.has(name)
   return (
     <Glyph
       size={size}
       strokeWidth={STROKE}
-      // A filled glyph needs no outline of its own: stroking it as well thickens
-      // the shape by half a pixel on every side and rounds off its corners.
-      fill={filled ? 'currentColor' : 'none'}
-      stroke={filled ? 'none' : 'currentColor'}
+      fill="none"
+      stroke="currentColor"
       aria-hidden="true"
       focusable="false"
     />

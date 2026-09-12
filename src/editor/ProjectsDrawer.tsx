@@ -1,3 +1,4 @@
+import { askConfirm } from '../components/confirm'
 import { useEffect, useState } from 'react'
 
 import { IconButton } from '../components/controls'
@@ -71,13 +72,18 @@ export function ProjectsDrawer() {
     setEditingId(null)
   }
 
-  const remove = (project: ProjectRecord): void => {
+  const remove = async (project: ProjectRecord): Promise<void> => {
     const last = projects.length === 1
     const message = last
-      ? `Delete “${project.name}”? It is the only project, so an empty one takes its place. This cannot be undone.`
-      : `Delete “${project.name}”? This cannot be undone.`
-    if (!window.confirm(message)) return
-    shelf().deleteProject(project.id)
+      ? 'It is the only project, so an empty one takes its place. This cannot be undone.'
+      : 'This cannot be undone.'
+    const sure = await askConfirm({
+      title: `Delete “${project.name}”?`,
+      message,
+      confirmLabel: 'Delete',
+      danger: true,
+    })
+    if (sure) shelf().deleteProject(project.id)
   }
 
   return (
@@ -168,7 +174,7 @@ export function ProjectsDrawer() {
                     items={[
                       { label: 'Rename', onSelect: () => beginRename(project) },
                       { label: 'Duplicate', onSelect: () => shelf().duplicateProject(project.id) },
-                      { label: 'Delete', onSelect: () => remove(project) },
+                      { label: 'Delete', onSelect: () => void remove(project) },
                     ]}
                   />
                 </div>

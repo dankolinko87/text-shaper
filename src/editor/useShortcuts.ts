@@ -2,6 +2,8 @@ import { useEffect } from 'react'
 
 import { memberAsFreed } from '../frame/frame'
 import { useDocumentStore } from '../state/documentStore'
+import { stackingLabel, type Stacking } from '../state/stacking'
+import { alignSelection, alignableCount, alignmentForKey } from './alignment'
 import { useProjectsStore } from '../state/projectsStore'
 import { useUiStore } from '../state/uiStore'
 import { collectAssetIds } from '../typography/paint'
@@ -198,6 +200,31 @@ export function useShortcuts(): void {
             return object ? !object.locked && object.visible : false
           }),
         )
+        return
+      }
+
+      // Stacking: ⌘] / ⌘[ one step, with ⌥ all the way — of the members
+      // picked inside a frame, or else of the selection.
+      if (mod && (e.key === ']' || e.key === '[')) {
+        const to: Stacking =
+          e.key === ']' ? (e.altKey ? 'front' : 'forward') : e.altKey ? 'back' : 'backward'
+        const before = doc.doc
+        if (ui.insideFrame && ui.frameSelection.length > 0) {
+          e.preventDefault()
+          doc.reorderFrameMembers(ui.insideFrame, ui.frameSelection, to)
+        } else if (doc.selection.length > 0) {
+          e.preventDefault()
+          doc.reorderObjects(doc.selection, to)
+        }
+        if (useDocumentStore.getState().doc !== before) doc.commit(stackingLabel(to))
+        return
+      }
+
+      // Lining up: ⌥A ⌥H ⌥D ⌥W ⌥V ⌥S, and ⌃⌥H / ⌃⌥V to distribute — Figma's.
+      const alignment = alignmentForKey(e)
+      if (alignment && alignableCount() > 1) {
+        e.preventDefault()
+        alignSelection(alignment.how)
         return
       }
 

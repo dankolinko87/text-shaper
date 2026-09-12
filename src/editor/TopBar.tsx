@@ -8,17 +8,16 @@ import { useDocumentStore } from '../state/documentStore'
 import { other } from '../state/theme'
 import { useUiStore } from '../state/uiStore'
 import { ExportMenu } from './ExportMenu'
-import { ZoomControl } from './ZoomControl'
+import { Toolbar } from './Toolbar'
+import { PlayButton, ZoomControl } from './ZoomControl'
 import './panels.css'
 
 /**
- * Open and Save are gone for now.
+ * The header: what is about the app on the left, the tools in the middle,
+ * what is about the view on the right.
  *
- * Both wrote to this browser's local storage, which autosave already does and
- * does better — see `state/autosave.ts`. Two buttons offering a weaker version
- * of something that happens by itself were mostly a way to be confused about
- * which copy of the work was the real one. What is missing, and what these were
- * NOT, is a way to get a document out of the browser as a file.
+ * Open and Save are gone for now. Both wrote to this browser's local storage,
+ * which autosave already does and does better — see `state/autosave.ts`.
  */
 export function TopBar() {
   const name = useDocumentStore((s) => s.doc.name)
@@ -36,7 +35,7 @@ export function TopBar() {
   return (
     <header className="topbar">
       <div className="topbar__section">
-        {/* The way into the projects: a chevron toward the drawer's edge, and an X while it is open. */}
+        {/* The way into the projects: a hamburger, and an X while the drawer is open. */}
         <Tooltip label={projectsOpen ? 'Hide projects' : `Show projects (${projectCount})`}>
           <button
             type="button"
@@ -45,7 +44,7 @@ export function TopBar() {
             aria-label={`${projectCount} ${projectCount === 1 ? 'project' : 'projects'}`}
             onClick={() => setProjectsOpen(!projectsOpen)}
           >
-            <Icon name={projectsOpen ? 'close' : 'chevronLeft'} size={20} />
+            <Icon name={projectsOpen ? 'close' : 'menu'} size={20} />
           </button>
         </Tooltip>
         {/*
@@ -84,6 +83,8 @@ export function TopBar() {
         />
       </div>
 
+      <Toolbar />
+
       {/* Undo and redo live on the keyboard (⌘Z, ⇧⌘Z); the header keeps to the document and the view. */}
       <div className="topbar__section topbar__section--end">
         {saveFailed ? (
@@ -95,6 +96,7 @@ export function TopBar() {
           </Tooltip>
         ) : null}
         <ZoomControl />
+        <PlayButton />
         {/*
           Getting the work OUT sits beside the controls for looking at it, not
           at the bottom of a properties tab. It belongs to the document rather

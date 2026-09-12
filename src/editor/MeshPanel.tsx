@@ -1,3 +1,4 @@
+import { askConfirm } from '../components/confirm'
 import { useMemo, useState } from 'react'
 
 import { Button, SegmentedControl, Slider, StrokeField } from '../components/controls'
@@ -106,17 +107,23 @@ export function MeshSettings({ object }: { object: MeshObject }) {
           <span className="field__label">Rebuild</span>
           <Button
             variant="ghost"
-            onClick={() => {
+            onClick={async () => {
               const differing = object.states.some(
                 (each, i) => i > 0 && !sameMeshGeometry(each, object.states[0] as MeshObject['states'][number]),
               )
               const losing = Math.max(0, object.tiles.length - object.seed.columns * object.seed.rows)
               const message = differing
-                ? `Rebuild the whole mesh as a ${object.seed.columns} × ${object.seed.rows} grid? ` +
-                  'Every state goes back to it, so the animation you have authored is flattened.'
-                : `Rebuild the whole mesh as a ${object.seed.columns} × ${object.seed.rows} grid?` +
-                  (losing > 0 ? ` The last ${losing} tile${losing === 1 ? '' : 's'} go with it.` : '')
-              if (!window.confirm(message)) return
+                ? 'Every state goes back to it, so the animation you have authored is flattened.'
+                : losing > 0
+                  ? `The last ${losing} tile${losing === 1 ? '' : 's'} go with it.`
+                  : 'Every state goes back to the grid.'
+              const sure = await askConfirm({
+                title: `Rebuild the whole mesh as a ${object.seed.columns} × ${object.seed.rows} grid?`,
+                message,
+                confirmLabel: 'Rebuild',
+                danger: true,
+              })
+              if (!sure) return
               if (store().rebuildMeshGrid(object.id)) store().commit('Rebuild grid')
             }}
           >

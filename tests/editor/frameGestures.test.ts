@@ -1,6 +1,8 @@
 import { Canvas } from 'fabric/node'
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
+import { ActiveSelection } from 'fabric'
+
 import { readMemberTransform } from '../../src/editor/Canvas'
 import { syncCanvas, type RenderedObject } from '../../src/editor/renderer'
 import { initClipper } from '../../src/geometry/clipper'
@@ -117,5 +119,30 @@ describe('reading a moved member back', () => {
     expect(after.states[0], 'state 1 untouched').toBe(before[0])
     expect(after.states[1], 'state 2 untouched').toBe(before[1])
     expect(valuesFor(member, after.states[2]).transform.x).toBeCloseTo(80, 6)
+  })
+
+  it('reads every member of a selection moved together, each by the whole move', () => {
+    store().duplicateFrameMember(frame, frameIn().members[0]!.id)
+    inside(0)
+    const kids = frameIn().members.map(
+      (member) => rendered.get(frame)!.group.getObjects().find((o) => o.get('memberId') === member.id)!,
+    )
+    const resting = frameIn().members.map((member) => valuesFor(member, frameIn().states[0]).transform)
+    kids[1]!.set({ left: (kids[1]!.left ?? 0) + 100 })
+    kids[1]!.setCoords()
+
+    // Fabric's own multi-pick, then a drag of it by 30, 20.
+    const held = new ActiveSelection(kids, { canvas: canvas as never })
+    held.set({ left: held.left + 30, top: held.top + 20 })
+    held.setCoords()
+
+    const reads = kids.map((kid) => readMemberTransform(kid)!)
+    expect(reads.map((r) => r.frameId)).toEqual([frame, frame])
+    expect(reads[0]!.transform.x).toBeCloseTo(resting[0]!.x + 30, 4)
+    expect(reads[0]!.transform.y).toBeCloseTo(resting[0]!.y + 20, 4)
+    expect(reads[1]!.transform.x).toBeCloseTo(resting[1]!.x + 100 + 30, 4)
+    expect(reads[1]!.transform.y).toBeCloseTo(resting[1]!.y + 20, 4)
+    expect(reads[0]!.transform.rotation).toBeCloseTo(0, 6)
+    expect(reads[0]!.transform.scaleX).toBeCloseTo(1, 6)
   })
 })

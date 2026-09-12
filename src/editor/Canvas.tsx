@@ -6,7 +6,7 @@ import {
   Rect as FabricRect,
   type TPointerEventInfo,
 } from 'fabric'
-import { useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 
 import { pointArtboardToObject } from '../geometry/objectSpace'
 import { MOSAIC_CELL } from '../types/mosaic'
@@ -64,7 +64,13 @@ import { FramePlate } from './FramePlate'
 import { ensureImagesLoaded } from './imageCache'
 import { CropLayer } from './CropLayer'
 import { CropBar } from './CropBar'
+import { ContextMenu, type ContextMenuEntry } from './ContextMenu'
+import { ALIGNMENT_OPTIONS, DISTRIBUTION_OPTIONS, alignSelection } from './alignment'
+import { stackingLabel, type Stacking } from '../state/stacking'
+import { decompose, invert, multiply } from '../geometry/transform'
+import type { Mat2D } from '../types/geometry'
 import { memberBoxes } from './frameBoxes'
+import { memberParentOf, memberProbe } from './memberTarget'
 import { MeshLayer } from './MeshLayer'
 import { MosaicLayer } from './MosaicLayer'
 import { showState, shownWindow, spreadHoldsGround, windowTransform } from './stated'
@@ -171,6 +177,9 @@ export function EditorCanvas() {
   const spread = useUiStore((s) => s.spread)
   const frameSelection = useUiStore((s) => s.frameSelection)
   const { stated } = useSelectedObject()
+  /** Where a right-click asked for the menu, in window pixels; null while there is none. */
+  /** Where the context menu is, and whether it is about objects or the members of the open frame. */
+  const [menuAt, setMenuAt] = useState<{ x: number; y: number; members: boolean } | null>(null)
   /** Moves when a picture arrives, so the group waiting for it is rebuilt. */
   const imageRevision = useUiStore((s) => s.imageRevision)
   const assets = useDocumentStore((s) => s.doc.assets)
@@ -201,7 +210,9 @@ export function EditorCanvas() {
       selectionLineWidth: 1,
       enableRetinaScaling: true,
       fireRightClick: false,
-      stopContextMenu: true,
+      // Left to bubble: the stage's own handler turns a right-click into the
+      // object menu, and takes the browser's menu away itself.
+      stopContextMenu: false,
     })
     fabricRef.current = canvas
     setLiveCanvas(canvas, () => renderedRef.current)
@@ -353,7 +364,7 @@ export function EditorCanvas() {
          * happened to be showing.
          */
         const picked = active.find((o) => o.get('memberId'))
-        const parent = picked?.group as { get?: (key: string) => unknown } | undefined
+        const parent = memberParentOf(picked)
         const frameId = parent?.get?.('statedId')
         const at = parent?.get?.('stateIndex')
         if (members.length > 0 && typeof frameId === 'string' && typeof at === 'number') {
@@ -439,13 +450,13 @@ export function EditorCanvas() {
      * frozen while everything else plays is a bad way to find that out.
      */
     const onManipulating = (opt: { target?: FabricObject }): void => {
-      const target = opt.target
+      const target = memberProbe(opt.target)
       /*
        * A member under the pointer holds its FRAME still: the frame is what
        * animates, and a member repainted from the clock mid-drag is a picture
        * that belongs to no state. Asked of the child's parent, not the store.
        */
-      const parent = target?.group as { get?: (key: string) => unknown } | undefined
+      const parent = memberParentOf(target)
       /*
        * A member FIRST. A member's inner group is built by the same builder as
        * a top-level object and carries that object's `shapeId` — which nothing
@@ -1485,7 +1496,53 @@ export function EditorCanvas() {
   }, [zoom, panX, panY])
 
   return (
-    <div className="canvas-stage" ref={containerRef} data-tool={activeTool}>
+    <div
+      className="canvas-stage"
+      ref={containerRef}
+      data-tool={activeTool}
+      /*
+       * A right-click on an object is a menu of what can be done to it — to
+       * all of the selection, once the object is part of it. On nothing, the
+       * browser's own menu stays away and nothing else happens.
+       */
+      onContextMenu={(e) => {
+        const canvas = fabricRef.current
+        if (!canvas) return
+        e.preventDefault()
+        const hit = canvas.findTarget(e.nativeEvent).target
+        const doc = useDocumentStore.getState()
+        const ui = useUiStore.getState()
+        /*
+         * Inside a frame, a press on a member is about the MEMBERS — a member
+         * child carries its own object's `shapeId`, so it is asked for its
+         * `memberId` first. One not yet picked becomes the pick, on the state
+         * its window draws, as a left-click would make it; a press on the
+         * frame's ground puts the pick down and is about the frame.
+         */
+        const probe = memberProbe(hit)
+        const memberId = probe?.get('memberId') as string | undefined
+        if (ui.insideFrame && memberId) {
+          if (!ui.frameSelection.includes(memberId)) {
+            const at = memberParentOf(probe)?.get?.('stateIndex')
+            if (typeof at === 'number') ui.setFramePick(ui.insideFrame, [memberId], at)
+            else ui.setFrameSelection([memberId])
+          }
+          setMenuAt({ x: e.clientX, y: e.clientY, members: true })
+          return
+        }
+        const id = hit?.get('shapeId') as string | undefined
+        // Several selected: Fabric answers with the selection itself, which is
+        // every one of them — the menu is for all of them.
+        const onSelection = hit instanceof ActiveSelection && doc.selection.length > 0
+        if (!id && !onSelection) {
+          setMenuAt(null)
+          return
+        }
+        if (ui.insideFrame && ui.frameSelection.length > 0) ui.setFrameSelection([])
+        if (id && !doc.selection.includes(id)) doc.setSelection([id])
+        setMenuAt({ x: e.clientX, y: e.clientY, members: false })
+      }}
+    >
       <canvas ref={canvasElRef} />
       <GridLayer canvas={fabricRef.current} rowBands={selectedRowBands} />
       {/*
@@ -1533,6 +1590,100 @@ export function EditorCanvas() {
       */}
       <ObjectBar canvas={fabricRef.current} inside={editedMosaic ?? editedMesh} />
       <CropBar canvas={fabricRef.current} />
+      {menuAt ? (
+        <ContextMenu
+          at={menuAt}
+          onClose={() => setMenuAt(null)}
+          items={(() => {
+            const act = (label: string, run: () => void) => (): void => {
+              run()
+              useDocumentStore.getState().commit(label)
+            }
+            /* Lining up: only when there is more than one thing to line up. */
+            const alignRows = (count: number): ContextMenuEntry[] =>
+              count > 1
+                ? [
+                    'divider',
+                    {
+                      row: [...ALIGNMENT_OPTIONS, ...(count > 2 ? DISTRIBUTION_OPTIONS : [])].map(
+                        (option) => ({
+                          label: option.label,
+                          shortcut: option.shortcut,
+                          icon: option.icon,
+                          onSelect: () => alignSelection(option.how),
+                        }),
+                      ),
+                    },
+                  ]
+                : []
+            const stacking = (move: (to: Stacking) => void): ContextMenuEntry[] =>
+              (['front', 'forward', 'backward', 'back'] as const).map((to) => ({
+                label: stackingLabel(to),
+                shortcut:
+                  to === 'front' ? '⌥⌘]' : to === 'forward' ? '⌘]' : to === 'backward' ? '⌘[' : '⌥⌘[',
+                onSelect: act(stackingLabel(to), () => move(to)),
+              }))
+
+            const ui = useUiStore.getState()
+            const doc = useDocumentStore.getState()
+            if (menuAt.members && ui.insideFrame) {
+              /* The members picked inside the open frame. */
+              const frameId = ui.insideFrame
+              const members = [...ui.frameSelection]
+              const many = members.length > 1
+              return [
+                {
+                  label: many ? 'Duplicate members' : 'Duplicate',
+                  shortcut: '⌘D',
+                  onSelect: act('Duplicate in frame', () => {
+                    const store = useDocumentStore.getState()
+                    const copies = members
+                      .map((memberId) => store.duplicateFrameMember(frameId, memberId))
+                      .filter((made): made is string => Boolean(made))
+                    if (copies.length > 0) useUiStore.getState().setFrameSelection(copies)
+                  }),
+                },
+                'divider',
+                ...stacking((to) =>
+                  useDocumentStore.getState().reorderFrameMembers(frameId, members, to),
+                ),
+                ...alignRows(members.length),
+                'divider',
+                {
+                  label: many ? 'Delete members' : 'Delete',
+                  shortcut: '⌫',
+                  danger: true,
+                  onSelect: act('Delete from frame', () => {
+                    if (useDocumentStore.getState().deleteFrameMembers(frameId, members)) {
+                      useUiStore.getState().setFrameSelection([])
+                    }
+                  }),
+                },
+              ]
+            }
+
+            const ids = [...doc.selection]
+            const many = ids.length > 1
+            return [
+              {
+                label: many ? 'Duplicate objects' : 'Duplicate',
+                shortcut: '⌘D',
+                onSelect: act('Duplicate', () => useDocumentStore.getState().duplicateObjects(ids)),
+              },
+              'divider',
+              ...stacking((to) => useDocumentStore.getState().reorderObjects(ids, to)),
+              ...alignRows(ids.length),
+              'divider',
+              {
+                label: many ? 'Delete objects' : 'Delete',
+                shortcut: '⌫',
+                danger: true,
+                onSelect: act('Delete', () => useDocumentStore.getState().deleteObjects(ids)),
+              },
+            ]
+          })()}
+        />
+      ) : null}
       {/* What a press means on a row, for every kind; and the number over each window. */}
       <SpreadLayer canvas={fabricRef.current} object={spreadObject} />
       <SpreadChips canvas={fabricRef.current} object={spreadObject} />
@@ -1624,7 +1775,14 @@ function applyCanvasMode(
   // placed, handles are being taken hold of.
   const crosshair = drawing || penning || mosaicking || framing
 
-  canvas.selection = activeTool === 'select' && !editing && !spread
+  /*
+   * On inside a frame as well: Fabric only joins a shift-clicked member to
+   * the one already held when `selection` is on, and that is how more than
+   * one member is picked. A press on the ground still drags the frame, and
+   * one outside it leaves — so the marquee it also allows only ever begins
+   * on the artboard.
+   */
+  canvas.selection = activeTool === 'select' && (!editing || inFrame) && !spread
   canvas.defaultCursor = panning ? 'grab' : crosshair ? 'crosshair' : 'default'
   canvas.hoverCursor = panning ? 'grab' : crosshair ? 'crosshair' : 'move'
   /*
@@ -1675,7 +1833,7 @@ export function readMemberTransform(
    * selects and a release modifies, and leaning on the store having caught up
    * would make the answer depend on event order.
    */
-  const parent = child.group as { get?: (key: string) => unknown } | undefined
+  const parent = memberParentOf(child)
   const frameId = parent?.get?.('statedId')
   const stamped = parent?.get?.('stateIndex')
   if (!memberId || typeof frameId !== 'string' || typeof stamped !== 'number') return null
@@ -1688,12 +1846,34 @@ export function readMemberTransform(
   const values = valuesFor(member, frame.states[at])
   const own = (child.get('localCentre') as Vec2 | undefined) ?? { x: 0, y: 0 }
 
-  const rotation = child.angle ?? 0
+  /*
+   * Where the child sits in its FRAME.
+   *
+   * Held alone, its own properties say: Fabric keeps a child's `left`/`top`
+   * relative to its group's centre. Held with others in an `ActiveSelection`,
+   * they do not — the selection re-parents it, rewrites its position as an
+   * offset from the selection's centre, and composes its own move, turn or
+   * scale on top only when it draws. So a pair of members dragged together
+   * read as one having moved by the wrong amount and the other not at all.
+   * The composed matrix, taken back into the frame's plane, is the same
+   * question answered once for both cases — as `readTransformFromGroup` does
+   * for objects on the artboard. The flips stay the child's: a selection
+   * cannot be flipped, and `decompose` folds a flipped X into a half turn.
+   */
+  const placed =
+    child.group !== parent && parent
+      ? readThroughSelection(child, parent as Group)
+      : {
+          left: child.left ?? 0,
+          top: child.top ?? 0,
+          rotation: child.angle ?? 0,
+          scaleX: Math.abs(child.scaleX ?? 1),
+          scaleY: Math.abs(child.scaleY ?? 1),
+        }
+  const { rotation, scaleX, scaleY } = placed
   const rad = (rotation * Math.PI) / 180
   const cos = Math.cos(rad)
   const sin = Math.sin(rad)
-  const scaleX = Math.abs(child.scaleX ?? 1)
-  const scaleY = Math.abs(child.scaleY ?? 1)
   const sx = scaleX * (child.flipX ? -1 : 1)
   const sy = scaleY * (child.flipY ? -1 : 1)
   const dx = own.x * sx
@@ -1705,14 +1885,34 @@ export function readMemberTransform(
     at,
     transform: {
       ...values.transform,
-      x: (child.left ?? 0) - (dx * cos - dy * sin),
-      y: (child.top ?? 0) - (dx * sin + dy * cos),
+      x: placed.left - (dx * cos - dy * sin),
+      y: placed.top - (dx * sin + dy * cos),
       scaleX,
       scaleY,
       rotation,
       flipX: Boolean(child.flipX),
       flipY: Boolean(child.flipY),
     },
+  }
+}
+
+/** A child's placement in `parent`'s plane, read through whatever Fabric has wrapped it in. */
+function readThroughSelection(
+  child: FabricObject,
+  parent: Group,
+): { left: number; top: number; rotation: number; scaleX: number; scaleY: number } {
+  const local = decompose(
+    multiply(invert(parent.calcTransformMatrix() as Mat2D), child.calcTransformMatrix() as Mat2D),
+  )
+  // `decompose` reports a flipped X as a half turn with Y flipped instead;
+  // the child's own flips are kept, so the turn comes back off the angle.
+  const rotation = local.rotation - (child.flipX ? 180 : 0)
+  return {
+    left: local.x,
+    top: local.y,
+    rotation: ((rotation % 360) + 540) % 360 - 180,
+    scaleX: local.scaleX,
+    scaleY: local.scaleY,
   }
 }
 
@@ -1749,11 +1949,28 @@ function syncSelectionToCanvas(
     const windows = entry ? windowsOf(entry) : []
     const at = Math.min(ui.mosaicStates[ui.insideFrame] ?? 0, Math.max(0, windows.length - 1))
     const group = windows[0]
-    const wanted = ui.frameSelection[0]
-    const child = wanted
-      ? (windows[at] ?? group)?.getObjects().find((each) => each.get('memberId') === wanted)
-      : undefined
+    const children = ui.frameSelection
+      .map((wanted) =>
+        (windows[at] ?? group)?.getObjects().find((each) => each.get('memberId') === wanted),
+      )
+      .filter((each): each is FabricObject => Boolean(each))
     const holding = canvas.getActiveObject()
+    /*
+     * More than one member picked: an `ActiveSelection` of them, the same
+     * thing Fabric builds when they are shift-clicked, so a multi-pick that
+     * came from the store — a menu action, a render after a write — wears
+     * one box and moves as one, as it does on the artboard. Kept when Fabric
+     * is already holding exactly these children.
+     */
+    if (children.length > 1) {
+      const same =
+        holding instanceof ActiveSelection &&
+        holding.size() === children.length &&
+        children.every((each) => holding.contains(each))
+      if (!same) canvas.setActiveObject(new ActiveSelection(children, { canvas }))
+      return
+    }
+    const child = children[0]
     if (child) {
       if (holding !== child) canvas.setActiveObject(child)
       return
@@ -2165,8 +2382,8 @@ function useFramePlayback(
      * global play the frame is merely held until the pointer lets go.
      */
     const onPress = (opt: { target?: FabricObject }): void => {
-      const hit = opt.target
-      const parent = hit?.group as { get?: (key: string) => unknown } | undefined
+      const hit = memberProbe(opt.target)
+      const parent = memberParentOf(hit)
       const frameId = hit?.get('memberId')
         ? (parent?.get?.('statedId') as string | undefined)
         : (hit?.get('statedId') as string | undefined)

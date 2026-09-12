@@ -5,7 +5,6 @@ import { snapshotArtwork } from '../editor/liveCanvas'
 import { ProjectsDrawer } from '../editor/ProjectsDrawer'
 import { PropertiesPanel } from '../editor/PropertiesPanel'
 import { StatesRail } from '../editor/StatesRail'
-import { Toolbar } from '../editor/Toolbar'
 import { TopBar } from '../editor/TopBar'
 import { useShortcuts } from '../editor/useShortcuts'
 import { useTextPaths } from '../editor/useTextPaths'
@@ -15,6 +14,7 @@ import { restoreAutosave, startAutosave } from '../state/autosave'
 import { useDocumentStore } from '../state/documentStore'
 import { useProjectsStore } from '../state/projectsStore'
 import { useUiStore } from '../state/uiStore'
+import { ConfirmHost } from '../components/confirm'
 import { forgetTokens } from '../editor/colours'
 import { applyTheme, writeTheme } from '../state/theme'
 import { loadFont } from '../typography/fontRegistry'
@@ -108,12 +108,6 @@ export function App() {
           <StatesRail />
           <main className="app__stage">
             <EditorCanvas />
-            {/*
-            The tools float over the stage rather than standing beside it: a
-            child of the stage so they follow its edges, and an absolute one so
-            the canvas underneath is still measured by the stage's own box.
-          */}
-            <Toolbar />
             {!ready || loadError ? (
               <div className="loading-overlay" role="status" aria-live="polite">
                 {loadError ? (
@@ -141,6 +135,7 @@ export function App() {
           </div>
         </div>
       </div>
+      <ConfirmHost />
     </div>
   )
 }

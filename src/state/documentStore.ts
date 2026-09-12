@@ -1,6 +1,7 @@
 import { collectAssetIds, samePaint } from '../typography/paint'
 import type { ImageAsset, ImageCrop, Paint } from '../types/paint'
 import { cropObjectOf, cropPaintFor, type CropTarget } from './cropModel'
+import { restack, type Stacking } from './stacking'
 import { create } from 'zustand'
 
 import { copyOutline, sameTopology, transformOutline } from '../geometry/outline'
@@ -694,6 +695,18 @@ export interface DocumentState {
   /** Drop every picture nothing refers to any more. */
   sweepAssets: () => void
   reorderObject: (id: string, toIndex: number) => void
+  /**
+   * Move some objects through the stack together, keeping their order among
+   * themselves: to the very front or back, or one step past the nearest
+   * object that is not one of them. Nothing changes when they are there
+   * already.
+   */
+  reorderObjects: (ids: readonly string[], to: 'front' | 'back' | 'forward' | 'backward') => void
+  /**
+   * The same move among a frame's members: their order in the list is their
+   * order on the canvas, last on top, as `objectOrder` is for the artboard.
+   */
+  reorderFrameMembers: (frameId: string, memberIds: readonly string[], to: Stacking) => void
   renameObject: (id: string, name: string) => void
   setVisible: (id: string, visible: boolean) => void
   setLocked: (id: string, locked: boolean) => void
@@ -3206,6 +3219,34 @@ export const useDocumentStore = create<DocumentState>()((set, get) => {
         order.splice(from, 1)
         order.splice(clamp(toIndex, 0, order.length), 0, id)
         return { ...doc, objectOrder: order }
+      })
+    },
+
+    reorderObjects(ids, to) {
+      mutate((doc) => {
+        const next = restack(doc.objectOrder, ids, to)
+        return next ? { ...doc, objectOrder: next } : doc
+      })
+    },
+
+    reorderFrameMembers(frameId, memberIds, to) {
+      mutate((doc) => {
+        const frame = doc.objects[frameId]
+        if (!frame || frame.kind !== 'frame') return doc
+        const next = restack(
+          frame.members.map((member) => member.id),
+          memberIds,
+          to,
+        )
+        if (!next) return doc
+        const byId = new Map(frame.members.map((member) => [member.id, member]))
+        return {
+          ...doc,
+          objects: {
+            ...doc.objects,
+            [frameId]: { ...frame, members: next.map((id) => byId.get(id)!) },
+          },
+        }
       })
     },
 

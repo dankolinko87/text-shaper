@@ -196,7 +196,7 @@ function MenuChevron({
   onToggle: () => void
 }) {
   return (
-    <Tooltip label={label} side="top">
+    <Tooltip label={label}>
       <button
         type="button"
         className="tool-menu__chevron"
@@ -238,7 +238,7 @@ function ToolMenu({ tools }: { tools: ToolDescriptor[] }) {
 
   return (
     <div className="tool-menu" ref={wrapRef}>
-      <Tooltip label={shown.label} shortcut={shown.shortcut} side="top">
+      <Tooltip label={shown.label} shortcut={shown.shortcut}>
         <button
           type="button"
           className="icon-button tool-menu__trigger"
@@ -332,7 +332,7 @@ function ShapeMenu() {
 
   return (
     <div className="tool-menu" ref={wrapRef}>
-      <Tooltip label={label} shortcut={preset ? undefined : 'B'} side="top">
+      <Tooltip label={label} shortcut={preset ? undefined : 'B'}>
         <button
           type="button"
           className="icon-button tool-menu__trigger"
@@ -392,8 +392,7 @@ export function Toolbar() {
         label={t.label}
         shortcut={t.shortcut}
         active={tool === t.id}
-        tooltipSide="top"
-        onClick={() => setTool(t.id)}
+                onClick={() => setTool(t.id)}
       />
     ))
 
@@ -404,11 +403,6 @@ export function Toolbar() {
         <ToolMenu tools={VIEW_TOOLS} />
         <ToolMenu tools={PATH_TOOLS} />
         {renderTools(TOOLS)}
-      </div>
-
-      <div className="pill__divider" role="separator" />
-
-      <div className="toolbar__group">
         <ShapeMenu />
       </div>
 

@@ -1,5 +1,13 @@
 /* ------------------------------------------------------------- Top bar */
 
+/*
+ * One bar across the top, in three parts: what is about the APP on the left
+ * — the projects, the mark, the document's name — what is about the VIEW on
+ * the right — zoom, play, export — and the TOOLS in the middle, where the
+ * hand can find them without looking down. The two sides share the width
+ * equally so the tools sit on the centre line, and the sides squeeze before
+ * anything could overlap.
+ */
 .topbar {
   display: flex;
   align-items: center;
@@ -16,6 +24,7 @@
   align-items: center;
   gap: var(--space-4);
   flex: 1;
+  min-width: 0;
 }
 .topbar__section--end {
   justify-content: flex-end;
@@ -60,6 +69,7 @@
 
 .topbar__name {
   width: 190px;
+  min-width: 0;
   padding: var(--space-2) var(--space-3);
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
@@ -80,47 +90,42 @@
 /* ------------------------------------------------------------- Toolbar */
 
 /*
- * The tools, floating at the bottom of the stage.
+ * The tools, in the middle of the header.
  *
- * A pill over the artwork rather than a rail beside it: the artboard gets the
- * full width, and the tools sit where the hand already is. It is a child of
- * the stage so it moves with the stage's edges and never with the panels; the
- * canvas underneath is measured by its own box, which an absolute sibling does
- * not change. Taller than the object bar's pill because tools are pressed all
- * day and the 32px buttons are the size every other button in the app is.
+ * Bare on the bar: no plate, no edge, no shadow, no divider — one row of
+ * buttons among the header's other buttons, drawn in its colours. A flex item between
+ * the header's two sides rather than an absolute child of the stage: the
+ * sides keep it centred and clear, and nothing can land on top of it.
  */
 .toolbar {
-  /* The pill's colours, from the tool pill's own set — which follows the theme. */
-  --pill-height: var(--tool-pill-height);
-  --pill-bg: var(--tool-pill-bg);
-  --pill-fg: var(--tool-pill-fg);
-  --pill-edge: var(--tool-pill-edge);
-  --pill-line: var(--tool-pill-line);
-  position: absolute;
-  left: 50%;
-  bottom: var(--space-6);
-  translate: -50% 0;
+  --pill-height: 36px;
+  --pill-bg: transparent;
+  --pill-fg: var(--text-secondary);
+  --pill-edge: transparent;
+  position: relative;
+  flex: none;
   z-index: var(--z-toolbar);
 }
 /* A rounded rectangle rather than the pill's full round: the same corners as
    the panels it floats among. The bar under an object keeps the pill. */
 .toolbar.pill {
   border-radius: var(--panel-radius);
+  box-shadow: none;
 }
 .toolbar__group {
   display: flex;
   gap: var(--space-2);
 }
-/* On the black pill the buttons are white, dimmed until pointed at. */
+/* The header's own button: grey at rest, lit on the surface when pointed at — as Export and Fit are. */
 .toolbar .icon-button {
-  color: color-mix(in srgb, var(--pill-fg) 72%, transparent);
-}
-.toolbar .icon-button:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--pill-fg) 12%, transparent);
   color: var(--pill-fg);
 }
+.toolbar .icon-button:hover:not(:disabled) {
+  background: var(--surface-3);
+  color: var(--text-primary);
+}
 .toolbar .icon-button:active:not(:disabled) {
-  background: color-mix(in srgb, var(--pill-fg) 20%, transparent);
+  background: var(--surface-2);
 }
 .toolbar .icon-button[data-active='true'] {
   background: var(--accent-muted);
@@ -151,15 +156,15 @@
   border: 0;
   border-radius: var(--radius-sm);
   background: transparent;
-  color: color-mix(in srgb, var(--pill-fg) 55%, transparent);
+  color: var(--text-tertiary);
   cursor: pointer;
   transition:
     background var(--duration-fast) var(--ease),
     color var(--duration-fast) var(--ease);
 }
 .tool-menu__chevron:hover {
-  background: color-mix(in srgb, var(--pill-fg) 12%, transparent);
-  color: var(--pill-fg);
+  background: var(--surface-3);
+  color: var(--text-primary);
 }
 .tool-menu__chevron[aria-expanded='true'] {
   color: var(--accent);
@@ -169,14 +174,13 @@
   outline-offset: -1px;
 }
 /*
- * Opens UPWARD, centred on its button: the pill is at the bottom of the stage,
- * so up is the only way there is room. Its surface and entrance are the shared
- * popover's; only the placement is its own.
+ * Opens DOWNWARD, centred on its button: the tools are along the top of the
+ * stage now, so down is where the room is. Its surface and entrance are the
+ * shared popover's; only the placement is its own.
  */
 .tool-menu__flyout {
-  --popover-from: var(--space-2);
   position: absolute;
-  bottom: calc(100% + var(--space-4));
+  top: calc(100% + var(--space-4));
   left: 50%;
   translate: -50% 0;
   display: flex;
@@ -1283,4 +1287,72 @@
 .section__chip--image {
   background-size: cover;
   background-position: center;
+}
+
+/* ------------------------------------------------------------ context menu */
+
+.context-menu {
+  position: fixed;
+  /* Above the bars that float on the canvas: it was asked for last. */
+  z-index: var(--z-float);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 196px;
+  padding: var(--space-2);
+}
+
+.context-menu__item {
+  justify-content: space-between;
+  gap: var(--space-5);
+}
+
+.context-menu__item[data-danger='true']:hover:not(:disabled) {
+  color: var(--danger, #c2410c);
+}
+
+.context-menu__shortcut {
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+}
+
+.context-menu__divider {
+  height: 0;
+  margin: var(--space-1) var(--space-2);
+  border: 0;
+  border-top: 1px solid var(--border-subtle);
+}
+
+/* Alignment: six glyphs in a row, spaced as the items above them are inset. */
+.context-menu__row {
+  display: flex;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+}
+
+.context-menu__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition:
+    background var(--duration-fast) var(--ease),
+    color var(--duration-fast) var(--ease);
+}
+
+.context-menu__icon:hover:not(:disabled),
+.context-menu__icon:focus-visible {
+  background: var(--surface-3);
+  color: var(--text-primary);
+}
+
+.context-menu__icon:disabled {
+  color: var(--text-disabled);
+  cursor: default;
 }

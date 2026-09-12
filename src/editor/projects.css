@@ -35,7 +35,7 @@
   background: transparent;
 }
 .app__drawer .panel__header {
-  height: 44px;
+  height: var(--topbar-height);
   padding: 0 var(--space-6);
   border-bottom: 0;
 }
@@ -138,8 +138,8 @@
 
 
 /*
- * The way in, left of the mark: a chevron the size of the header's other
- * icons, pointing at the drawer's edge. No plate and no number — the count
+ * The way in, left of the mark: a hamburger the size of the header's other
+ * icons, an X while the drawer is open. No plate and no number — the count
  * is on the drawer itself, and the tooltip says it. Sized like an icon
  * button, with air on its right so the mark is not crowded.
  */
