@@ -2,8 +2,10 @@
 
 Live: https://dankolinko87.github.io/text-shaper/ — built and published from `main` by `.github/workflows/deploy.yml`.
 
-An experimental typography tool. Draw a closed shape with a brush, type text into it, and the text
-wraps, scales, and stretches to fill the shape's usable area.
+A typography tool for type that is shaped, tiled, bent and animated. Draw a shape and type into
+it; lay letters into a mosaic of tiles; pull a mesh of cells about and the letters bend with them;
+put objects in a frame with states and play the transitions; fill any of it with a solid, a
+gradient or a picture; export the result as a GIF.
 
 **The governing rule:** the shape controls how the text is distributed and how it looks. It never
 changes the text itself. The text you type appears exactly once — never repeated, truncated,
@@ -11,40 +13,91 @@ reordered, or invented.
 
 ---
 
-## Status: editor foundation plus shape-driven deformation
+## What works
 
-The full product is planned in eight phases. The editor foundation is complete, and the typography
-engine now deforms letterforms to follow the container rather than only wrapping text inside it.
+### Shapes and text
 
-### What works
-
-- Freehand shape drawing: capture, arc-length resample, Bézier refit, smooth, close, repair
-  self-intersections, drop tiny fragments.
+- Freehand shapes with the brush: capture, arc-length resample, Bézier refit, smooth, close, repair
+  self-intersections, drop tiny fragments. Preset shapes (ellipse, rectangle, triangle, hexagon and
+  the rest) from the same menu.
+- Open paths with the pen (click for corners, drag for curves, continue or close an existing path)
+  and the pencil (freehand line).
+- Point editing inside any shape or path, the way vector editors do it: click, shift-click, a box
+  or an ⌥ lasso to select points; drag or nudge them with the arrows (⇧ for ten); snapping to the
+  path's other points; ⇧ to constrain a drag to an axis. Double-click an edge for a point.
 - Text fitting: padded inset region, scanline span sampling, candidate layouts scored and selected,
-  real glyph outlines from opentype.js.
-- Three fitting modes: LINE STRETCH (scale each line), GLYPH STRETCH (distribute the surplus between
-  glyphs so letters keep their proportions), and BOUNDARY WARP (deform outlines so the type follows
-  the container's curves).
-- Distortion controls: follow-shape strength, vertical, wave and wave frequency, shear, per-glyph
-  size variation and rotation, noise and noise scale, and a re-rollable seed. All deterministic.
+  real glyph outlines from opentype.js. Five modes: LINE STRETCH, GLYPH STRETCH, BOUNDARY WARP
+  (outlines deformed to follow the container), RING (a lap or a spiral around the shape) and PATH
+  (along a line you drew — the only mode an open path can be in).
+- Distortion controls in Warp mode: follow-shape strength, vertical, wave and wave frequency, shear,
+  per-glyph size variation and rotation, noise and noise scale, and a re-rollable seed. All
+  deterministic.
 - Text flow modes: word wrap, character wrap, and preserved manual line breaks.
-- Multiple independent objects, each with its own shape, text, colour, and transform.
-- Select, multi-select, move, scale, rotate, duplicate, delete.
-- Layers: rename, reorder, hide, lock, select.
-- An endless canvas — nothing is clipped to a page, and the view frames your work until you zoom or
-  pan yourself.
-- Text reflows live as you type, while the whole edit still collapses into one undo entry.
-- Undo/redo, where one brush gesture is one history entry.
-- Save and reload an editable project as versioned JSON in local storage.
-- Keyboard shortcuts: `V` select, `B` draw, `H` / `Space` pan, `⌫` delete, `⌘Z` / `⌘⇧Z` undo and
-  redo, `⌘D` duplicate, `⌘A` select all, `Esc` cancel.
+- Eight bundled display fonts, picked per object.
+
+### Mosaics and meshes
+
+- A **mosaic** is a grid of tiles with a letter or a word in each. Tiles are split, merged and
+  their dividers dragged; the letters are typed straight into the tiles with a caret, pasted, and
+  reflowed in reading order. A mosaic has states: each one records where the lines sit and what
+  every tile is worth, and playing it tweens between them.
+- A **mesh** is the mosaic's free-cornered cousin: cells you can pull about by their nodes and
+  edges, add points to, cut across, grow out of the rim (⌘-drag an edge) and remove. A letter is
+  poured through the cell's own map, so it bends with the cell — and so does a picture filling it.
+  A drag is held back where a cell would fold, cross a neighbour or get too thin for its insets;
+  the handles turn amber to say so.
+
+### Frames and animation
+
+- A **frame** is a place with states: objects go in it and every state records where each member
+  stands, its opacity and its appearance. Playing a frame tweens the members between the states,
+  and a member absent from one side fades. Members are picked, moved, resized and turned inside
+  the frame with Fabric's own controls; shift-click picks several; ⌘-drag takes one out.
+- Every object with states shares one timeline model: per-state hold and transition times, six
+  monotone easings, looping, a playback speed. States are duplicated, reordered, retimed and spread
+  out side by side to be compared.
+- Colour effects on solid fills (cycle, flicker) and motion on gradients (sweep, hover, pulse).
+- Play runs everything on the artboard at once; each object's own preview runs it alone.
+
+### Paint
+
+- Every colour input except the page and export backgrounds takes a **solid, a gradient or a
+  picture**: text fill, shape fill, banner, lines, tile backgrounds, letter fills, object and frame
+  backgrounds. One picker with three tabs.
+- Pictures are document assets, imported from a file, scaled to a sane size, and cropped on the
+  canvas: drag to pan, corners to zoom. A crop is per state, so it animates like a colour does.
+- Blending rule for everything that animates: tween what can be tweened, cut the rest at the
+  midpoint. A solid to a gradient promotes the solid; two gradients unify their stops; two crops of
+  the same picture slide between each other.
+
+### The editor
+
+- An endless canvas: nothing is clipped to a page, and the view frames your work until you zoom or
+  pan yourself. ⇧1 fits it again.
+- Select, multi-select, move, scale, rotate, duplicate, delete; drag an object into a frame to add
+  it. Right-click for a menu: duplicate, stacking (⌘] ⌘[ with ⌥ for all the way), delete — and with
+  more than one thing selected, a row of alignment and distribution buttons with Figma's ⌥
+  shortcuts. Inside a frame the same menu works on the picked members.
+- The states rail on the left, the properties panel on the right, the tools in the header; light
+  and dark themes (press the mark).
+- Undo/redo, where one gesture is one history entry. Text reflows live as you type while the whole
+  edit still collapses into one entry.
+- Projects: several per browser, in a drawer with a thumbnail, name and dates on each card; rename,
+  duplicate, delete. Every change is autosaved. The dev server keeps a second copy in
+  `.autosave/document.<port>.json`, so a fresh browser profile finds the work again.
+- Export as GIF: one selected shape, mosaic or mesh, at a chosen size, frame count and background.
+- Keyboard: `V` select, `H` / `Space` pan, `B` shape, `P` pen, `L` pencil, `M` mosaic, `N` mesh,
+  `F` frame, `G` edit the selected shape's points, arrows nudge, `⌫` delete, `⌘Z` / `⌘⇧Z` undo and
+  redo, `⌘D` duplicate, `⌘C` / `⌘V` copy and paste, `⌘A` select all, `⌘⇧N` new project, `⇧1` fit,
+  `Esc` out one level.
 
 ### What is not built yet
 
-Reshape brushes (Add / Erase / Push-Pull / Smooth / Restore), animation, and PNG/SVG/GIF export are
-later phases. Per the project's own rule, none of them appear in the UI as placeholder controls — if
-you can see a control, it works. The distortion panel is shown only in Warp mode, because every
-slider in it feeds the warp field and would do nothing in the other two.
+Exporting a frame, PNG and SVG export, reshape brushes (Add / Erase / Push-Pull / Smooth /
+Restore), complex-script text (see below). Per the project's own rule, none of them appear in the
+UI as placeholder controls — if you can see a control, it works. The layers panel exists in
+`editor/LayersPanel.tsx` but is not mounted: with the states rail and the properties panel it had
+nothing left to say.
 
 ---
 
@@ -80,14 +133,17 @@ the architecture boundary rules described below, so a layering violation fails t
 Data flows one way: **state → engine → render**.
 
 ```
-React UI        (components/, editor/)   reads store, dispatches actions; no geometry maths
-Zustand store   (state/)                 document model, history, ephemeral UI state
-Pure engines    (geometry/, typography/) plain TypeScript, DOM-free, unit tested
-Fabric renderer (editor/)                reconciles store objects onto the canvas
+React UI        (app/, components/, editor/)                 reads the stores, dispatches actions; no geometry maths
+Zustand stores  (state/)                                     document model, history, projects, ephemeral UI state
+Pure engines    (geometry/, typography/, mosaic/, mesh/,     plain TypeScript, DOM-free, unit tested
+                 frame/, anim/)
+Fabric renderer (editor/)                                    reconciles store objects onto the canvas
+Exporters       (export/)                                    draw the same model to an offscreen canvas and encode it
 ```
 
-`geometry/` and `typography/` never import React, Zustand, or Fabric. They take plain data and
-return plain data, which is why the whole engine is testable in Node with no browser.
+The engines never import React, Zustand, or Fabric. They take plain data and return plain data,
+which is why the whole engine is testable in Node with no browser. `types/` holds the document
+model — versioned, with a migration per version in `state/persistence.ts`.
 
 ### Enforced boundaries
 
@@ -117,10 +173,14 @@ survive Vite or Vitest regardless.
 ### Rendering
 
 Glyph outlines and shape outlines are **SVG path strings** everywhere — in the document model, in
-the store, in tests, and (in a later phase) in SVG export. Fabric rasterises those strings to canvas
-for the interactive editor. There is exactly one vector representation, so what you see and what
-gets exported cannot drift apart. Canvas rather than an SVG DOM layer because later phases warp
-thousands of Bézier points per frame during live reshaping, which the DOM handles poorly.
+the store, in tests, in the thumbnails and in the GIF exporters. Fabric rasterises those strings to
+canvas for the interactive editor. There is exactly one vector representation, so what you see and
+what gets exported cannot drift apart. Canvas rather than an SVG DOM layer because playback warps
+thousands of Bézier points per frame, which the DOM handles poorly.
+
+A picture filling a mesh cell is drawn through the cell's map as triangles (`geometry/warpImage.ts`),
+the same map the letter is poured through, so the two bend together; elsewhere a picture is a
+Fabric pattern anchored to the object's box.
 
 ### Coordinate spaces
 
@@ -129,8 +189,9 @@ thousands of Bézier points per frame during live reshaping, which the DOM handl
 - **Object-local** — where all path geometry is stored.
 
 An object's local origin is its bounding-box centre **at creation time**, and it never moves again.
-Rotation and scale happen about it, and Phase 4's brush edits will change the outline without
-shifting the origin — otherwise every brush dab would visually translate the object.
+Rotation and scale happen about it, and point edits change the outline without shifting the origin
+— otherwise every drag of a point would visually translate the object. A frame's members are stored
+in the frame's own space, so a frame moves and turns as one thing.
 
 Fabric positions a group by the centre of its children's combined bounds, which is not the object's
 local origin. `positionGroup` and `readTransformFromGroup` in `editor/renderer.ts` convert between
@@ -191,14 +252,13 @@ Fonts are loaded as **TTF**, not WOFF2 — opentype.js has no Brotli decoder and
 
 ## Fonts
 
-Bundled: **Anton** (SIL Open Font License 1.1), in `src/fonts/files/` with its licence.
+Eight bundled display faces, all under the SIL Open Font License 1.1, in `src/fonts/files/` with
+a licence per family in `src/fonts/licenses/`: Anton, Archivo Black, Bebas Neue, Alfa Slab One,
+Abril Fatface, Bowlby One SC, Bungee and Pirata One. `src/fonts/manifest.ts` is the list; adding a
+face is one entry and one TTF.
 
-The rest of the curated set (Archivo Black, Anybody, Barlow Condensed, League Spartan, Space Grotesk,
-Syne, Unbounded — all OFL, all verified available as TTF) lands with the font picker in a later
-phase rather than shipping now as an unusable control.
-
-Roboto Flex and Recursive are deferred: they are variable fonts, and opentype.js exposes only the
-default instance, so their variable axes would be inert.
+Variable fonts are out: opentype.js exposes only the default instance, so their axes would be
+inert.
 
 ---
 
@@ -208,14 +268,16 @@ default instance, so their variable axes would be inert.
 npm test
 ```
 
-86 tests covering the pure engines and the store: path closing and simplification, inset padding and
-its collapse, scanline spans on convex/concave/multi-span shapes, hole preservation, region
-filtering, local-coordinate round-trips under rotation and scale, the text invariant across all
-three flow modes, short text in large shapes and long text in small ones, one-gesture-one-undo, and
-serialisation round-trips.
+About 1,650 tests in 130 files, all in Node with no DOM: the pure engines (paths, insets, spans,
+fitting, the text invariant, mosaic dissection and typing, mesh geometry and legality, timelines
+and blending, paints and placement), the stores (actions, history, migrations for every schema
+version, projects), and the editor itself — the Fabric reconciler runs on Fabric's Node build, so
+what a drag, a pick or a playback frame does to the canvas is tested by driving the real object
+graph. `tests/styles/classNames.test.ts` checks that every class a component uses has a rule and
+every rule has a component.
 
-The suite runs in Node with no DOM. `tests/typography/preview.test.ts` additionally writes rendered
-SVGs to `preview/` so fitting quality can be inspected by eye.
+`tests/typography/preview.test.ts` additionally writes rendered SVGs to `preview/` so fitting
+quality can be inspected by eye.
 
 ### The text invariant
 

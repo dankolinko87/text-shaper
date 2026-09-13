@@ -42,7 +42,7 @@ export function ObjectLabel({ canvas }: { canvas: FabricCanvas | null }) {
     e.preventDefault()
   }
   const onPointerMove = (e: ReactPointerEvent<HTMLSpanElement>): void => {
-    dragRef.current?.move(scene(e))
+    dragRef.current?.move(scene(e), e.shiftKey)
   }
   const onPointerUp = (): void => {
     dragRef.current?.end()

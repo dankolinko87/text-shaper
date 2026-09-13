@@ -71,6 +71,7 @@ import { decompose, invert, multiply } from '../geometry/transform'
 import type { Mat2D } from '../types/geometry'
 import { memberBoxes } from './frameBoxes'
 import { memberParentOf, memberProbe } from './memberTarget'
+import { constrainMove } from './objectDrag'
 import { MeshLayer } from './MeshLayer'
 import { MosaicLayer } from './MosaicLayer'
 import { showState, shownWindow, spreadHoldsGround, windowTransform } from './stated'
@@ -502,6 +503,32 @@ export function EditorCanvas() {
       cloneRef.current = store.duplicateInPlace(store.selection)
     }
 
+    /*
+     * Shift while dragging holds the move to one axis.
+     *
+     * Fabric has placed the target for this move already; the displacement
+     * from where the gesture began — the transform's `original` — is held to
+     * its dominant axis and written back, before anything else reads the
+     * position. The same for an object, a selection of them and a member
+     * inside a frame: `original` is in whatever plane the target moves in.
+     */
+    const onConstrained = (opt: {
+      e?: Event
+      target?: FabricObject
+      transform?: { action?: string; original?: { left?: number; top?: number } }
+    }): void => {
+      const target = opt.target
+      const original = opt.transform?.original
+      if (!target || !original || opt.transform?.action !== 'drag') return
+      if (!(opt.e as MouseEvent | undefined)?.shiftKey) return
+      const left = original.left ?? target.left
+      const top = original.top ?? target.top
+      const held = constrainMove({ x: target.left - left, y: target.top - top })
+      if (target.left === left + held.x && target.top === top + held.y) return
+      target.set({ left: left + held.x, top: top + held.y })
+      target.setCoords()
+    }
+
     const onSettled = (): void => {
       const ui = useUiStore.getState()
       if (ui.interacting) ui.setInteracting(null)
@@ -587,6 +614,7 @@ export function EditorCanvas() {
     canvas.on('selection:created', onSelection)
     canvas.on('selection:updated', onSelection)
     canvas.on('selection:cleared', onCleared)
+    canvas.on('object:moving', onConstrained)
     canvas.on('object:moving', onManipulating)
     canvas.on('object:moving', onMoving)
     canvas.on('object:scaling', onManipulating)
@@ -598,6 +626,7 @@ export function EditorCanvas() {
       canvas.off('selection:created', onSelection)
       canvas.off('selection:updated', onSelection)
       canvas.off('selection:cleared', onCleared)
+      canvas.off('object:moving', onConstrained)
       canvas.off('object:moving', onManipulating)
       canvas.off('object:moving', onMoving)
       canvas.off('object:scaling', onManipulating)

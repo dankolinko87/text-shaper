@@ -5,6 +5,7 @@ import {
   bilinearQuad,
   cellMap,
   collinearChain,
+  distanceToSegment,
   edgesOf,
   insetPolygon,
   interiorOf,
@@ -160,6 +161,33 @@ describe('insets', () => {
       const tip = clamped[1]!
       expect(Math.hypot(tip.x - 200, tip.y - 2)).toBeLessThanOrEqual(0.5 * 4 + 1e-9)
     }
+  })
+
+  it('swallows a side shorter than the inset instead of voiding the polygon', () => {
+    // A thin cell whose tip is two nodes five units apart: the tips of two
+    // cut cells, or a point added beside a corner. Half a gap of ten runs
+    // through that side and out the other end.
+    const tip = { x: 443, y: 510 }
+    const ring: Vec2[] = [{ x: 385, y: 320 }, { x: 500, y: 320 }, { x: tip.x + 4, y: tip.y - 3 }, tip]
+    const out = insetPolygon(ring, [0, 10, 10, 10])
+    expect(out, 'the tile is still there').not.toBeNull()
+    expect(out).toHaveLength(4)
+    // Both ends of the swallowed side sit on one point: where the two long
+    // sides' inset lines meet, ten in from each, inside the cell.
+    near(out![2]!, out![3]!)
+    expect(polygonArea(out!)).toBeGreaterThan(0)
+    expect(isSimple(out!.slice(0, 3))).toBe(true)
+    const merged = out![3]!
+    expect(distanceToSegment(merged, ring[1]!, ring[2]!)).toBeCloseTo(10, 3)
+    expect(distanceToSegment(merged, ring[3]!, ring[0]!)).toBeCloseTo(10, 3)
+    expect(merged.y).toBeLessThan(tip.y)
+    expect(merged.y).toBeGreaterThan(320)
+    // A whole tile lays out with a visible face at a gap that used to hide it.
+    const tile = { id: 't', ring: ['a', 'b', 'c', 'd'], corners: ['a', 'b', 'c', 'd'] as [string, string, string, string] }
+    const positions = { a: ring[0]!, b: ring[1]!, c: ring[2]!, d: ring[3]! }
+    const interior = (p: string, q: string) => !((p === 'a' && q === 'b') || (p === 'b' && q === 'a'))
+    const layout = tileLayout(tile, positions, { gap: 20.5, glyphInset: 6, outerPadding: 0 }, interior)
+    expect(polygonArea(layout.visible)).toBeGreaterThan(1000)
   })
 
   it('collapses rather than inverting', () => {

@@ -15,9 +15,24 @@ import type { Vec2 } from '../types/document'
  * along; the history hears about it once, at the end.
  */
 
+/**
+ * A move held to one axis — what Shift means while something is being MOVED.
+ *
+ * The dominant axis of the displacement so far wins and the other is zeroed,
+ * re-judged on every move, so the object follows the pointer exactly along
+ * whichever way it has gone further and switches when the pointer does —
+ * Figma's rule. Not the pen's `constrain`, which snaps a DIRECTION to a 45°
+ * ray while keeping the distance: that is right for aiming a handle, and
+ * wrong for moving, where a diagonal that drifts is exactly the thing Shift
+ * is held to prevent. A tie goes to x.
+ */
+export function constrainMove(delta: Vec2): Vec2 {
+  return Math.abs(delta.y) > Math.abs(delta.x) ? { x: 0, y: delta.y } : { x: delta.x, y: 0 }
+}
+
 export interface ObjectDrag {
-  /** The pointer is here now, in artboard units. */
-  move: (scene: Vec2) => void
+  /** The pointer is here now, in artboard units; held to one axis when Shift is down. */
+  move: (scene: Vec2, constrained?: boolean) => void
   /** Let go: one history entry, if it went anywhere. */
   end: () => void
   /** Escape: back where it started, nothing recorded. */
@@ -42,10 +57,10 @@ export function beginObjectDrag(id: string, from: Vec2): ObjectDrag | null {
   }
 
   return {
-    move(scene) {
+    move(scene, constrained = false) {
       if (done) return
-      const dx = scene.x - from.x
-      const dy = scene.y - from.y
+      const raw = { x: scene.x - from.x, y: scene.y - from.y }
+      const { x: dx, y: dy } = constrained ? constrainMove(raw) : raw
       const current = useDocumentStore.getState().doc.objects[id]
       if (!current) return
       const x = start.x + dx

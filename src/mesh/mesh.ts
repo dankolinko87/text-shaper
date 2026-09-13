@@ -284,10 +284,20 @@ export interface InsetOptions {
  * a bevel adds a vertex and everything downstream relies on a point of the
  * inset polygon corresponding to a point of the original.
  *
- * Null when the inset ate the polygon: the area went below the minimum, a
- * side reversed, or the result crosses itself. The caller collapses to the
- * centroid, which is what the mosaic's `clampRect` does with a rectangle inset
- * past nothing — collapse rather than invert.
+ * A side SHORTER than the inset is swallowed, not fatal. Two nodes close
+ * together — a cut that ended a hair from a node, a point added beside a
+ * corner, the tips of two thin cells meeting — make a side the inset runs
+ * through and out the other end, reversed. That used to void the whole
+ * polygon, so a tile vanished the moment the gap grew past the length of
+ * its shortest side, and came back when it shrank. Now both ends of such a
+ * side land on the one point where its neighbours' inset lines meet — the
+ * vertex a true offset would have — which keeps a point of the inset for
+ * every point of the original, as everything downstream relies on.
+ *
+ * Null when the inset ate the polygon: the area went below the minimum, it
+ * turned inside out, or the result crosses itself. The caller collapses to
+ * the centroid, which is what the mosaic's `clampRect` does with a rectangle
+ * inset past nothing — collapse rather than invert.
  */
 export function insetPolygon(
   points: readonly Vec2[],
@@ -352,20 +362,78 @@ export function insetPolygon(
 
   if (!insets.some((inset) => inset > 0)) return out
 
-  const area = polygonArea(out)
-  if (!(area * sign > EPSILON) || Math.abs(area) < minimumArea) return null
-  for (let i = 0; i < n; i++) {
+  /*
+   * A side that now runs the other way has been inset through itself: its
+   * two ends swap places for the point where the sides either side of it
+   * meet. One at a time, because swallowing a side moves its neighbours'
+   * ends and can shorten the next side past nothing too; a polygon with no
+   * sides left to run forward is eaten, which the area check below says.
+   */
+  const reversed = (i: number): boolean => {
     const a = points[i] ?? ORIGIN
     const b = points[(i + 1) % n] ?? ORIGIN
     const c = out[i] ?? ORIGIN
     const d = out[(i + 1) % n] ?? ORIGIN
     const ox = b.x - a.x
     const oy = b.y - a.y
-    if (ox * ox + oy * oy <= EPSILON) continue
-    // A side that now runs the other way has been inset through itself.
-    if ((d.x - c.x) * ox + (d.y - c.y) * oy < 0) return null
+    if (ox * ox + oy * oy <= EPSILON) return false
+    return (d.x - c.x) * ox + (d.y - c.y) * oy < 0
   }
-  if (!isSimple(out)) return null
+  for (let pass = 0; pass < n; pass++) {
+    const i = Array.from({ length: n }, (_, k) => k).find(reversed)
+    if (i === undefined) break
+    const j = (i + 1) % n
+    const before = (i - 1 + n) % n
+    const after = (j + 1) % n
+    // The side before runs from point `before` to `i`; the side after from `j` to `after`.
+    const p1 = points[before] ?? ORIGIN
+    const p2 = points[j] ?? ORIGIN
+    const d1 = dirs[before] ?? last
+    const d2 = dirs[j] ?? last
+    const n1 = normals[before] ?? ORIGIN
+    const n2 = normals[j] ?? ORIGIN
+    const a = insets[before] ?? 0
+    const b = insets[j] ?? 0
+    const pi = points[i] ?? ORIGIN
+    const pj = points[j] ?? ORIGIN
+    const anchor = { x: (pi.x + pj.x) / 2, y: (pi.y + pj.y) / 2 }
+    const cross = d1.x * d2.y - d1.y * d2.x
+    let q: Vec2
+    if (Math.abs(cross) < 1e-9) {
+      const mean = (a + b) / 2
+      q = { x: anchor.x + n2.x * mean, y: anchor.y + n2.y * mean }
+    } else {
+      const rx = p2.x + b * n2.x - (p1.x + a * n1.x)
+      const ry = p2.y + b * n2.y - (p1.y + a * n1.y)
+      const s = (rx * d2.y - ry * d2.x) / cross
+      q = { x: p1.x + a * n1.x + s * d1.x, y: p1.y + a * n1.y + s * d1.y }
+      const reach = Math.hypot(q.x - anchor.x, q.y - anchor.y)
+      const limit = mitreLimit * Math.max(a, b)
+      if (limit > 0 && reach > limit) {
+        q = {
+          x: anchor.x + ((q.x - anchor.x) * limit) / reach,
+          y: anchor.y + ((q.y - anchor.y) * limit) / reach,
+        }
+      }
+    }
+    if (after === before) {
+      // A triangle whose one side went: nothing is left to meet.
+      return null
+    }
+    out[i] = { ...q }
+    out[j] = { ...q }
+  }
+
+  const area = polygonArea(out)
+  if (!(area * sign > EPSILON) || Math.abs(area) < minimumArea) return null
+  if (Array.from({ length: n }, (_, k) => k).some(reversed)) return null
+  // Simplicity is judged with swallowed sides folded away: a repeated point
+  // is two sides touching, which is not a crossing.
+  const distinct = out.filter((p, i) => {
+    const prev = out[(i - 1 + n) % n] ?? ORIGIN
+    return Math.abs(p.x - prev.x) > EPSILON || Math.abs(p.y - prev.y) > EPSILON
+  })
+  if (distinct.length < 3 || !isSimple(distinct)) return null
   return out
 }
 

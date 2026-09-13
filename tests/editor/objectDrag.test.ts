@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 
-import { beginObjectDrag, nudgeSelection } from '../../src/editor/objectDrag'
+import { beginObjectDrag, constrainMove, nudgeSelection } from '../../src/editor/objectDrag'
 import { useDocumentStore } from '../../src/state/documentStore'
 import { useUiStore } from '../../src/state/uiStore'
 
@@ -56,6 +56,23 @@ describe('dragging an object by a handle', () => {
     expect(at(id)).toEqual([100, 200])
     expect(store().past.length).toBe(past)
     expect(useUiStore.getState().interacting).toBeNull()
+  })
+
+  it('holds a move to its dominant axis while Shift is down, and lets go when it is not', () => {
+    expect(constrainMove({ x: 30, y: 10 })).toEqual({ x: 30, y: 0 })
+    expect(constrainMove({ x: -4, y: 12 })).toEqual({ x: 0, y: 12 })
+    expect(constrainMove({ x: 5, y: -5 }), 'a tie goes to x').toEqual({ x: 5, y: 0 })
+    const id = make()
+    const drag = beginObjectDrag(id, { x: 0, y: 0 })!
+    drag.move({ x: 40, y: 15 }, true)
+    expect(at(id)).toEqual([140, 200])
+    // The pointer has gone further down now: the axis follows it.
+    drag.move({ x: 40, y: 90 }, true)
+    expect(at(id)).toEqual([100, 290])
+    // Shift let go mid-drag: the pointer's own place.
+    drag.move({ x: 40, y: 90 })
+    expect(at(id)).toEqual([140, 290])
+    drag.end()
   })
 
   it('refuses a locked object', () => {

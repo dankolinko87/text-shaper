@@ -111,7 +111,8 @@ export function FramePlate({
       drag = beginObjectDrag(held.id, canvas.getScenePoint(opt.e as MouseEvent))
     }
     const onMove = (opt: { e: Event }): void => {
-      drag?.move(canvas.getScenePoint(opt.e as MouseEvent))
+      const mouse = opt.e as MouseEvent
+      drag?.move(canvas.getScenePoint(mouse), mouse.shiftKey)
     }
     const release = (): void => {
       if (selectionWas !== null) {
